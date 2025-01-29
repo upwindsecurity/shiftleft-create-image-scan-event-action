@@ -1,0 +1,73 @@
+---
+name: Upwind Security Image Scanning
+description: Scan against built images
+inputs:
+  upwind_client_id:
+    description: Upwind Client ID
+    required: true
+  upwind_client_secret:
+    description: Upwind Client Secret
+    required: true
+  docker_image:
+    description: Already built docker image residing on same runner
+    required: true
+  docker_user:
+    description: User to authenticate to the Docker registry
+    required: false
+  docker_password:
+    description: Password to authenticate to the Docker registry
+    required: false
+  pull_image:
+    description: Attempt to pull the image. Set to false if image is available locally
+    default: true
+    type: boolean
+  upwind_uri:
+    description: Public Upwind URI domain name
+    default: upwind.io
+    required: false
+  debug:
+    description: Enable debug logging
+    default: false
+    type: boolean
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get auth token
+      id: get_auth_token
+      shell: bash
+      run: |
+        TOKEN=$(curl -sSL -X POST \
+          --url https://oauth.${{ inputs.upwind_uri }}/oauth/token \
+          --data 'audience=https://agent.${{ inputs.upwind_uri }}' \
+          --data "client_id=${{ inputs.upwind_client_id }}" \
+          --data "client_secret=${{ inputs.upwind_client_secret }}" \
+          --data grant_type=client_credentials | jq -r '.access_token')
+        echo "value=$TOKEN" >> $GITHUB_OUTPUT
+    - name: Download sensor binary
+      shell: bash
+      run: |
+        UPWIND_AGENT=shiftleft
+        AGENT_OUTPUT=$GITHUB_WORKSPACE/$UPWIND_AGENT
+        UPWIND_AGENT_URL=https://releases.${{ inputs.upwind_uri }}/$UPWIND_AGENT/stable/$UPWIND_AGENT
+        curl -fsS -H "Authorization: Bearer ${{ steps.get_auth_token.outputs.value }}" -L $UPWIND_AGENT_URL -o $AGENT_OUTPUT
+        chmod +x $AGENT_OUTPUT
+        echo "Info: Upwind sensor binary downloaded to: $AGENT_OUTPUT"
+    - name: Execute scan against the docker image
+      shell: bash
+      run: |
+        sudo ${{ github.workspace }}/shiftleft image \
+          --source=GITHUB_ACTIONS \
+          --initiator=${GITHUB_TRIGGERING_ACTOR} \
+          --upwind-uri=${{ inputs.upwind_uri }} \
+          --upwind-client-id=${{ inputs.upwind_client_id }} \
+          --upwind-client-secret=${{ inputs.upwind_client_secret }} \
+          --docker-image ${{ inputs.docker_image }} \
+          --commit-sha ${GITHUB_SHA} \
+          --branch ${GITHUB_REF} \
+          --repository ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} \
+          --docker-user="${{ inputs.docker_user }}" \
+          --docker-password="${{ inputs.docker_password }}" \
+          --debug=${{ inputs.debug }}  \
+          --docker-pull=${{ inputs.pull_image }}
+        echo "Info: Image scan completed"
