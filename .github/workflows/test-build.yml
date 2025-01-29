@@ -1,0 +1,23 @@
+---
+name: Shift-Left Test Run
+
+on:
+  workflow_dispatch:
+
+  workflow_call:
+      
+  pull_request:
+
+jobs:
+  Build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute Upwind CI scan plugin
+        uses: upwindsecurity/shiftleft-create-image-scan-event-action@${GITHUB_SHA}
+        with:
+          upwind_client_id: ${{ secrets.INTEGRATION_UPWIND_CI_EVENT_DEV_CLIENT_ID }}
+          upwind_client_secret: ${{ secrets.INTEGRATION_UPWIND_CI_EVENT_DEV_CLIENT_SECRET }}
+          upwind_uri: "upwind.dev"
+          docker_image: 'ubuntu:22.04'
