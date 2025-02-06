@@ -2,29 +2,30 @@
 
 ## Overview
 
-The Upwind Security ShiftLeft ShiftLeft Scan Event Publish Event Action enables seamless integration of Docker image vulnerability scanning into your CI/CD workflows. This action notifies the Upwind Console of a built image, before scanning for vulnerabilities.
+The Upwind Security ShiftLeft Create Image Scan Event Action enables seamless integration of Docker image vulnerability scanning into your CI/CD workflows. This action notifies the Upwind Console of a built image, before scanning for vulnerabilities.
 
 ## Prerequisites
+
 - Currently supported architectures: `linux/amd64`.
--	Docker Environment: Ensure that the GitHub runner has access to Docker to build and manage images.
--	Upwind Credentials: Obtain your Upwind Client ID and Client Secret for authentication.
+- Docker Environment: Ensure that the GitHub runner has access to Docker to build and manage images.
+- Upwind Credentials: Obtain your Upwind Client ID and Client Secret for authentication.
 
 ## Inputs
 
 Define the following inputs in your workflow to configure the ShiftLeft actions:
 
--	`upwind_client_id` (required): Your Upwind Client ID.
--	`upwind_client_secret` (required): Your Upwind Client Secret.
+- `upwind_client_id` (required): Your Upwind Client ID.
+- `upwind_client_secret` (required): Your Upwind Client Secret.
 - `docker_image` (required): The Docker image to scan, which should reside on the same runner.
--	`docker_user` (optional): Username for authenticating to the Docker registry.
--	`docker_password` (optional): Password for authenticating to the Docker registry.
--	`pull_image` (optional): Boolean flag to determine if the image should be pulled. Set to false if the image is available locally. Default is true.
+- `docker_user` (optional): Username for authenticating to the Docker registry.
+- `docker_password` (optional): Password for authenticating to the Docker registry.
+- `pull_image` (optional): Boolean flag to determine if the image should be pulled. Set to false if the image is available locally. Default is true.
 
 ## Usage
 
 To integrate the ShiftLeft scanning action into your GitHub workflow, include the following step:
 
-```
+```yaml
 - name: Upwind Security ShiftLeft Scanning
   uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
   with:
@@ -39,13 +40,14 @@ To integrate the ShiftLeft scanning action into your GitHub workflow, include th
 Ensure that sensitive information, such as `upwind_client_id`, `upwind_client_secret`, and `docker_password`, are stored securely using GitHub Secrets.
 
 ## Versioning
+
 It is recommended that you track the `main` branch rather than a specified tag. This will ensure that you always have the most up to date version of the action.
 
 ## Example Workflow
 
 Below is a sample GitHub Actions workflow that builds a Docker image and scans it using the Upwind Security ShiftLeft image scanner:
 
-```
+```yaml
 name: Docker Image Build and Scan
 
 on:
@@ -86,6 +88,6 @@ jobs:
 This workflow triggers on pushes to the main branch, builds the Docker image, and then scans it for vulnerabilities using the CloudScanner action. The image does not need to be pulled because it is available locally via the Docker daemon. The
 
 ## Troubleshooting
--	Authentication Issues: Verify that your Upwind credentials are correct and have the necessary permissions.
--	Docker Access: Ensure that the GitHub runner has the required permissions to access Docker.
 
+- Authentication Issues: Verify that your Upwind credentials are correct and have the necessary permissions.
+- Docker Access: Ensure that the GitHub runner has the required permissions to access Docker.
