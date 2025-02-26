@@ -21,6 +21,14 @@ inputs:
     description: Attempt to pull the image. Set to false if image is available locally
     default: true
     type: boolean
+  oci_client:
+    description: Client with which to pull image. Options are docker (default), podman, and skopeo
+    default: docker
+    type: string
+  output_json:
+    description: File location to write JSON output to
+    default: ""
+    type: string
   upwind_uri:
     description: Public Upwind URI domain name
     default: upwind.io
@@ -69,5 +77,11 @@ runs:
           --docker-user="${{ inputs.docker_user }}" \
           --docker-password="${{ inputs.docker_password }}" \
           --debug=${{ inputs.debug }}  \
-          --docker-pull=${{ inputs.pull_image }}
+          --docker-pull=${{ inputs.pull_image }} \
+          --output-json=$JSON_FILE \
+          --oci-client=${{ inputs.oci_client }}
+        cat $JSON_FILE >> "$GITHUB_OUTPUT"
+        if [[ -n "${{ inputs.output_json }}" ]]; then
+          mv $JSON_FILE "${{ inputs.output_json }}"
+        fi
         echo "Info: Image scan completed"
