@@ -29,6 +29,10 @@ inputs:
     description: File location to write JSON output to
     default: ""
     type: string
+  commit_sha:
+    description: SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable
+    default: ${GITHUB_SHA}
+    required: false
   upwind_uri:
     description: Public Upwind URI domain name
     default: upwind.io
@@ -64,6 +68,11 @@ runs:
     - name: Execute scan against the docker image
       shell: bash
       run: |
+        echo "Running Upwind Scan"
+        COMMIT_SHA=${GITHUB_SHA}
+        if [[ -n "${{ inputs.commit_sha }}" ]]; then
+          COMMIT_SHA=${{ inputs.commit_sha }}
+        fi
         sudo ${{ github.workspace }}/shiftleft image \
           --source=GITHUB_ACTIONS \
           --initiator=${GITHUB_TRIGGERING_ACTOR} \
@@ -71,7 +80,7 @@ runs:
           --upwind-client-id=${{ inputs.upwind_client_id }} \
           --upwind-client-secret=${{ inputs.upwind_client_secret }} \
           --docker-image ${{ inputs.docker_image }} \
-          --commit-sha ${GITHUB_SHA} \
+          --commit-sha ${COMMIT_SHA} \
           --branch ${GITHUB_REF} \
           --repository ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} \
           --docker-user="${{ inputs.docker_user }}" \
