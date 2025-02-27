@@ -21,6 +21,8 @@ Define the following inputs in your workflow to configure the ShiftLeft actions:
 -	`pull_image` (optional): Boolean flag to determine if the image should be pulled. Set to false if the image is available locally. Default is true.
 - `oci_client` (optional): Which client should be used to pull the image. The default `docker` will use the docker daemon. Other options include `podman` and `skopeo`. Note that the binary must be installed and available on the path.
 - `output_json` (optional): path to output JSON results to
+- `commit_sha` (optional): SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable
+
 ## Usage
 
 To integrate the ShiftLeft scanning action into your GitHub workflow, include the following step:
