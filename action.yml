@@ -37,6 +37,11 @@ inputs:
     description: Public Upwind URI domain name
     default: upwind.io
     required: false
+  use_sudo:
+    description: whether to use sudo when invoking the scan to connect to the OCI client
+    default: true
+    required: false
+    type: boolean
   debug:
     description: Enable debug logging
     default: false
@@ -76,7 +81,13 @@ runs:
         if [[ -n "${{ inputs.commit_sha }}" ]]; then
           COMMIT_SHA=${{ inputs.commit_sha }}
         fi
-        sudo ${{ github.workspace }}/shiftleft image \
+
+        SUDO=""
+        if [ "${{ inputs.use_sudo }}" = "true" ]; then
+          SUDO=sudo
+        fi
+
+        $SUDO ${{ github.workspace }}/shiftleft image \
           --source=GITHUB_ACTIONS \
           --initiator=${GITHUB_TRIGGERING_ACTOR} \
           --upwind-uri=${{ inputs.upwind_uri }} \
