@@ -23,6 +23,7 @@ Define the following inputs in your workflow to configure the ShiftLeft actions:
 - `output_json` (optional): path to output JSON results to
 - `commit_sha` (optional): SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable
 - `additional_registries` (optional): Comma-separated list of additional registries to associate with the scanned image, passed as a string (String input)
+- `use_sudo` (optional): indicate whether the scanner should run with `sudo` to be able to access the image
 
 ## Usage
 
