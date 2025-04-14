@@ -25,6 +25,9 @@ inputs:
     description: Client with which to pull image. Options are docker (default), podman, and skopeo
     default: docker
     type: string
+  additional_registries:
+    description: Comma-separated list of additional registries to associate with the scanned image
+    required: false
   output_json:
     description: File location to write JSON output to
     default: ""
@@ -87,6 +90,7 @@ runs:
           --docker-user="${{ inputs.docker_user }}" \
           --docker-password="${{ inputs.docker_password }}" \
           --debug=${{ inputs.debug }}  \
+          --additional-registries ${{ inputs.additional_registries}} \
           --docker-pull=${{ inputs.pull_image }} \
           --output-json=$JSON_FILE \
           --oci-client=${{ inputs.oci_client }}
