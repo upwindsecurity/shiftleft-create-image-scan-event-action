@@ -27,7 +27,6 @@ inputs:
     type: string
   additional_registries:
     description: Comma-separated list of additional registries to associate with the scanned image, passed as a string
-    default: ""
     required: false
   output_json:
     description: File location to write JSON output to
