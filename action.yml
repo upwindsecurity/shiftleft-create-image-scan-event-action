@@ -50,7 +50,7 @@ inputs:
     default: false
     type: boolean
   block_on:
-    description: Block on which scan recommendation
+    description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
 
 runs:
   using: "composite"
