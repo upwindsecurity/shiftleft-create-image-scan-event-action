@@ -88,7 +88,7 @@ runs:
           SUDO=sudo
         fi
   
-        $SUDO ${{ github.workspace }}/shiftleft image \
+        ${{ github.workspace }}/shiftleft image \
           --source=GITHUB_ACTIONS \
           --initiator=${GITHUB_TRIGGERING_ACTOR} \
           --upwind-uri=${{ inputs.upwind_uri }} \
