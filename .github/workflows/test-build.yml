@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Execute Upwind CI scan plugin
-        uses: upwindsecurity/shiftleft-create-image-scan-event-action@${GITHUB_SHA}
+        uses: ./
         with:
           upwind_client_id: ${{ secrets.INTEGRATION_UPWIND_CI_EVENT_DEV_CLIENT_ID }}
           upwind_client_secret: ${{ secrets.INTEGRATION_UPWIND_CI_EVENT_DEV_CLIENT_SECRET }}
