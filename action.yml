@@ -45,6 +45,15 @@ inputs:
     default: true
     required: false
     type: boolean
+  github_token:
+    description: GitHub token for authentication
+    required: false
+  pr_number:
+    description: Pull request number
+    required: false
+  repo_name:
+    description: The GitHub repository in owner/repo format
+    required: false
   add_comment:
     description: Whether to add a comment to the PR when a scan is completed
     default: false
@@ -60,6 +69,19 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Validate required inputs
+      shell: bash
+      run: |
+        if [[ "${{ inputs.add_comment }}" == "true" ]]; then
+          missing=""
+          [[ -z "${{ inputs.github_token }}"]] && missing+=" github_token"
+          [[ -z "${{ inputs.pr_number }}"]] && missing+=" pr_number"
+          [[ -z "${{ inputs.repo_name }}"]] && missing+=" repo_name"
+          if [[ -n "$missing" ]]; then
+            echo "Error: Missing required inputs for add_comment=true:$missing"
+            exit 1
+          fi
+        fi
     - name: Get auth token
       id: get_auth_token
       shell: bash
@@ -140,12 +162,12 @@ runs:
         fi
         echo "Info: Image scan completed"
     - name: Comment on PR (conditional)
-      if: ${{ inputs.add_comment == true && github.event.pull_request }}
+      if: ${{ inputs.add_comment == true}}
       shell: bash
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        REPO: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.number }}
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ inputs.repo_name }}
+        PR_NUMBER: ${{ inputs.pr_number }}
       run: |
         COMMENT_BODY=$(cat "${{ inputs.output_json }}" | jq -Rs .)
           curl -L \
