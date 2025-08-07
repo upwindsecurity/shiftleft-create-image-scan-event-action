@@ -72,12 +72,26 @@ runs:
     - name: Validate required inputs
       shell: bash
       run: |
-        if [[ "${{ inputs.add_comment }}" == "true" ]]; then
+        if [ "${{ inputs.add_comment }}" == "true" ]; then
           missing=""
-          [[ -z "${{ inputs.github_token }}"]] && missing+=" github_token"
-          [[ -z "${{ inputs.pr_number }}"]] && missing+=" pr_number"
-          [[ -z "${{ inputs.repo_name }}"]] && missing+=" repo_name"
-          if [[ -n "$missing" ]]; then
+
+          if [-z "${{ inputs.github_token }}" ]; then
+            missing+=" github_token]
+          fi
+
+          if [ -z "${{ inputs.github_token }}" ]; then
+            missing+=" github_token"
+          fi
+
+          if [ -z "${{ inputs.pr_number }}" ]; then
+            missing+=" pr_number"
+          fi
+
+          if [ -z "${{ inputs.repo_name }}" ]; then
+            missing+=" repo_name"
+          fi
+
+          if [ -n "$missing" ]; then
             echo "Error: Missing required inputs for add_comment=true:$missing"
             exit 1
           fi
