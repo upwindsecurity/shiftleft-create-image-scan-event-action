@@ -72,12 +72,8 @@ runs:
     - name: Validate required inputs
       shell: bash
       run: |
-        if [ "${{ inputs.add_comment }}" == "true" ]; then
+        if [ "${{ inputs.add_comment }}" = "true" ]; then
           missing=""
-
-          if [-z "${{ inputs.github_token }}" ]; then
-            missing+=" github_token]
-          fi
 
           if [ -z "${{ inputs.github_token }}" ]; then
             missing+=" github_token"
