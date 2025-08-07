@@ -179,6 +179,7 @@ runs:
         REPO: ${{ inputs.repo_name }}
         PR_NUMBER: ${{ inputs.pr_number }}
       run: |
+        echo "Info: Adding report comment"
         COMMENT_BODY=$(cat "${{ inputs.output_json }}" | jq -Rs .)
           curl -L \
             -X POST \
