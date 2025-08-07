@@ -45,6 +45,11 @@ inputs:
     default: true
     required: false
     type: boolean
+  add_comment:
+    description: Whether to add a comment to the PR when a scan is completed
+    default: false
+    required: false
+    type: boolean
   debug:
     description: Enable debug logging
     default: false
@@ -134,3 +139,19 @@ runs:
           mv $JSON_FILE "${{ inputs.output_json }}"
         fi
         echo "Info: Image scan completed"
+    - name: Comment on PR (conditional)
+      if: ${{ inputs.add_comment == true && github.event.pull_request }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.number }}
+      run: |
+        COMMENT_BODY=$(cat "${{ inputs.output_json }}" | jq -Rs .)
+          curl -L \
+            -X POST \
+            -H "Authorization: bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "{\"body\": $COMMENT_BODY}" \
+            "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
