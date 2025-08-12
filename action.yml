@@ -30,7 +30,7 @@ inputs:
     required: false
   output_json:
     description: File location to write JSON output to
-    default: ""
+    default: "output.json"
     type: string
   commit_sha:
     description: SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable
@@ -137,6 +137,8 @@ runs:
         chmod +x "$AGENT_OUTPUT"
     - name: Execute scan against the docker image
       shell: bash
+      env:
+        OUTPUT_JSON: ${{ inputs.output_json }}
       run: |
         echo "Running Upwind Scan"
         COMMIT_SHA=${GITHUB_SHA}
@@ -163,28 +165,84 @@ runs:
           --debug=${{ inputs.debug }}  \
           --additional-registries="${{ inputs.additional_registries}}" \
           --docker-pull=${{ inputs.pull_image }} \
-          --output-json=$JSON_FILE \
+          --output-json=$OUTPUT_JSON \
           --oci-client=${{ inputs.oci_client }} \
           --block-on="${{ inputs.block_on}}"
-        cat $JSON_FILE >> "$GITHUB_OUTPUT"
-        if [[ -n "${{ inputs.output_json }}" ]]; then
-          mv $JSON_FILE "${{ inputs.output_json }}"
+        if [ ! -f "$OUTPUT_JSON" ]; then
+          echo "Error: $OUTPUT_JSON not found"
+          exit 1
         fi
+
         echo "Info: Image scan completed"
     - name: Comment on PR (conditional)
-      if: ${{ inputs.add_comment == true}}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         REPO: ${{ inputs.repo_name }}
         PR_NUMBER: ${{ inputs.pr_number }}
+        ADD_COMMENT: ${{ inputs.add_comment }}
+        OUTPUT_JSON: ${{ inputs.output_json }}
       run: |
-        echo "Info: Adding report comment"
-        COMMENT_BODY=$(cat "${{ inputs.output_json }}" | jq -Rs .)
-          curl -L \
-            -X POST \
-            -H "Authorization: bearer $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -d "{\"body\": $COMMENT_BODY}" \
-            "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+        if [ "$ADD_COMMENT" != "true" ]; then
+          echo "Info: Skipping comment"
+          exit 0
+        fi
+
+        if [ ! -f "$OUTPUT_JSON" ]; then
+          echo "Error: Output file not found: $OUTPUT_JSON"
+          exit 1
+        fi
+
+        # Normalise JSON
+        CLEAN="$(mktemp)"
+        ARRAY="$(mktemp)"
+
+        # Strip unsafe quotes inside cveDescription (leave key but clear value)
+        perl -0777 -pe 's/"cveDescription"\s*:\s*"(.*?)"(?=\s*,\s*"(?:packageName|isFunneled|status|severity|score|isExploitable|isFixAvailable|fixedInVersion|cvssVector)"\s*:)/"cveDescription": ""/sg' \
+          "$OUTPUT_JSON" > "$CLEAN"
+
+        # Create an array from stream of valid json objects
+        jq -cs 'if type=="array" then . else [.] end' "$CLEAN" > "$ARRAY"
+
+        # Build base comment
+        IMAGE_NAME=$(jq -r '.[0].imageName // "unknown"' "$ARRAY")
+        IMAGE_VERSION=$(jq -r '.[0].imageVersion // "unknown"' "$ARRAY")
+
+        COMMENT="# 🏄‍♂️ Upwind Image Scan Report"$'\n'
+        COMMENT+="**Image:** \`$IMAGE_NAME:$IMAGE_VERSION\`"$'\n\n'
+
+        # Loop through each architecture
+        while IFS= read -r scan; do
+          ARCH=$(echo "$scan" | jq -r '.arch? // ""')
+            [ -z "$ARCH" ] && ARCH="arch not specified"
+          STATUS=$(echo "$scan" | jq -r '.scanStatus // "unknown"')
+
+          # Extract values. T = Total CVEs | N = New CVEs | O = Old CVEs | H = High Severity CVEs
+          T=$(echo "$scan" | jq '.introducedCves // [] | length')
+          N=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="introduced")] | length')
+          O=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="no_change")] | length')
+          H=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.severity=="HIGH")] | length')
+
+          if [ "$T" -eq 0 ]; then
+            COMMENT+="## $ARCH ✅"$'\n'
+            COMMENT+="- **Status:** \`$STATUS\`"$'\n'
+            COMMENT+="- **CVEs:** No new CVEs detected"$'\n\n'
+          else
+            COMMENT+="## $ARCH ⚠️"$'\n'
+            COMMENT+="- **Status:** \`$STATUS\`"$'\n'
+            COMMENT+="- **Total CVEs:** \`$T\` (\`$N\` new, \`$O\` existing)"$'\n'
+            COMMENT+="- **High severity:** \`$H\`"$'\n\n'
+          fi
+
+        done < <(jq -c '.[]' "$ARRAY")
+
+        echo "Posting summary comment on PR"
+
+        COMMENT_JSON=$(jq -n --arg body "$COMMENT" '{ body: $body }')
+        curl -L \
+          -X POST \
+          -H "Authorization: bearer $GH_TOKEN" \
+          -H "Content-Type: application/json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          -d "$COMMENT_JSON" \
+          "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
