@@ -130,7 +130,7 @@ runs:
         UPWIND_AGENT="shiftleft"
         AGENT_OUTPUT="${{ github.workspace }}/$UPWIND_AGENT"
         # All binaries are pulled from US
-        UPWIND_AGENT_URL="https://releases.upwind.io/$UPWIND_AGENT/stable/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"
+        UPWIND_AGENT_URL="https://releases.${{ inputs.upwind_uri }}/$UPWIND_AGENT/stable/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"
 
         echo "Downloading from $UPWIND_AGENT_URL"
         curl -fsS -H "Authorization: Bearer $TOKEN" -L "$UPWIND_AGENT_URL" -o "$AGENT_OUTPUT"
@@ -194,15 +194,12 @@ runs:
         fi
 
         # Normalise JSON
-        CLEAN="$(mktemp)"
         ARRAY="$(mktemp)"
 
-        # Strip unsafe quotes inside cveDescription (leave key but clear value)
-        perl -0777 -pe 's/"cveDescription"\s*:\s*"(.*?)"(?=\s*,\s*"(?:packageName|isFunneled|status|severity|score|isExploitable|isFixAvailable|fixedInVersion|cvssVector)"\s*:)/"cveDescription": ""/sg' \
-          "$OUTPUT_JSON" > "$CLEAN"
-
         # Create an array from stream of valid json objects
-        jq -cs 'if type=="array" then . else [.] end' "$CLEAN" > "$ARRAY"
+        jq -cs 'if type=="array" then . else [.] end' "$OUTPUT_JSON" > "$ARRAY"
+
+        CLEAN_ARCHES=""
 
         # Build base comment
         IMAGE_NAME=$(jq -r '.[0].imageName // "unknown"' "$ARRAY")
@@ -217,24 +214,101 @@ runs:
             [ -z "$ARCH" ] && ARCH="arch not specified"
           STATUS=$(echo "$scan" | jq -r '.scanStatus // "unknown"')
 
-          # Extract values. T = Total CVEs | N = New CVEs | O = Old CVEs | H = High Severity CVEs
           T=$(echo "$scan" | jq '.introducedCves // [] | length')
           N=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="introduced")] | length')
           O=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="no_change")] | length')
           H=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.severity=="HIGH")] | length')
+          C=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.severity=="CRITICAL")] | length')
+          OTHER=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))] | length')
 
           if [ "$T" -eq 0 ]; then
-            COMMENT+="## $ARCH ✅"$'\n'
-            COMMENT+="- **Status:** \`$STATUS\`"$'\n'
-            COMMENT+="- **CVEs:** No new CVEs detected"$'\n\n'
-          else
-            COMMENT+="## $ARCH ⚠️"$'\n'
-            COMMENT+="- **Status:** \`$STATUS\`"$'\n'
-            COMMENT+="- **Total CVEs:** \`$T\` (\`$N\` new, \`$O\` existing)"$'\n'
-            COMMENT+="- **High severity:** \`$H\`"$'\n\n'
+            CLEAN_ARCHES+="- \`$ARCH\` (status: \`$STATUS\`)"$'\n'
+            continue
           fi
 
+          # Header for this arch
+          COMMENT+="## $ARCH"$'\n'
+          COMMENT+="- **Status:** \`$STATUS\`"$'\n'
+          COMMENT+="- **Total CVEs:** \`$T\` (\`$N\` new, \`$O\` existing)"$'\n'
+          COMMENT+="- **Critical:** \`$C\`, **High:** \`$H\`"$'\n\n'
+
+          build_table() {
+            local sev="$1" heading="$2" rows
+            if [ "$sev" = "OTHER" ]; then
+              # Everything not CRITICAL/HIGH (MEDIUM/LOW/UNKNOWN)
+              rows=$(echo "$scan" | jq -r '
+                [.introducedCves // [] | .[]
+                  | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))][]
+                | [
+                    (.cveId // .cveName // "<unknown>"),
+                    ((.cveDescription // "")
+                      | gsub("\\|"; "\\\\|")
+                      | gsub("`"; "\\\\`")
+                      | gsub("<"; "&lt;")
+                      | gsub(">"; "&gt;")
+                      | gsub("\r?\n"; " ")
+                      | .[0:400]),
+                    ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
+                  ]
+                | @tsv
+              ')
+            else
+              rows=$(echo "$scan" | jq -r --arg sev "$sev" '
+                [.introducedCves // [] | .[] | select((.severity // "" | ascii_upcase)==$sev)][]
+                | [
+                    (.cveId // .cveName // "<unknown>"),
+                    ((.cveDescription // "")
+                      | gsub("\\|"; "\\\\|")
+                      | gsub("`"; "\\\\`")
+                      | gsub("<"; "&lt;")
+                      | gsub(">"; "&gt;")
+                      | gsub("\r?\n"; " ")
+                      | .[0:400]),
+                    ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
+                  ]
+                | @tsv
+              ')
+            fi
+            [ -z "$rows" ] && return 0
+            
+            COMMENT+=$'| CVE | Description | Package |\n'
+            COMMENT+=$'|---|---|---|\n'
+            while IFS=$'\t' read -r CVE DESC PKG; do
+              [ -z "${CVE}" ] && CVE="<unknown>"
+              [ -z "${PKG}" ] && PKG="<pkg>"
+              COMMENT+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
+            done <<< "$rows"
+            COMMENT+=$'\n'
+          }
+
+          # CRITICAL table (visible if any)
+          if [ "$C" -gt 0 ]; then
+            COMMENT+=$'### Critical severity\n\n'
+            build_table "CRITICAL" "Critical severity"
+          fi
+
+          # HIGH table (visible if any)
+          if [ "$H" -gt 0 ]; then
+            COMMENT+=$'### High severity\n\n'
+            build_table "HIGH" "High severity"
+          fi
+
+          # OTHER severities in a collapsed details section
+          if [ "$OTHER" -gt 0 ]; then
+            COMMENT+=$'<details><summary><strong>Other severities</strong> (Medium/Low/Unknown) — '
+            COMMENT+="\`$OTHER\` CVEs"
+            COMMENT+=$'</summary>'$'\n\n'
+            build_table "OTHER" "Other severities"
+            COMMENT+=$'</details>'$'\n\n'
+          fi
         done < <(jq -c '.[]' "$ARRAY")
+
+        # Collapsed list of totally clean arches (if any)
+        if [ -n "$CLEAN_ARCHES" ]; then
+          COMMENT+=$'<details><summary><strong>More architectures</strong> — all clear ✅</summary>'$'\n\n'
+          COMMENT+="$CLEAN_ARCHES"$'\n'
+          COMMENT+=$'</details>'$'\n'
+        fi
 
         echo "Posting summary comment on PR"
 
