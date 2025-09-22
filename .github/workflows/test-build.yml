@@ -17,9 +17,9 @@ jobs:
       - name: Execute Upwind CI scan plugin
         uses: ./
         with:
-          upwind_client_id: ${{ secrets.INTEGRATION_UPWIND_CI_EVENT_DEV_CLIENT_ID }}
-          upwind_client_secret: ${{ secrets.INTEGRATION_UPWIND_CI_EVENT_DEV_CLIENT_SECRET }}
-          upwind_uri: "upwind.dev"
+          upwind_client_id: ${{ secrets.UPWIND_CLIENT_ID }}
+          upwind_client_secret: ${{ secrets.UPWIND_CLIENT_SECRET }}
+          upwind_uri: upwind.dev
           docker_image: 'ubuntu:22.04'
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_number: ${{ github.event.number }}

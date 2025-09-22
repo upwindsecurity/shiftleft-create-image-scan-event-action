@@ -92,8 +92,9 @@ runs:
             exit 1
           fi
         fi
-    - name: Get auth token
-      id: get_auth_token
+    - name: Download Binary
+      id: download_binary
+
       shell: bash
       run: |
         response=$(curl -sSL -X POST \
@@ -128,9 +129,8 @@ runs:
         esac
 
         UPWIND_AGENT="shiftleft"
-        AGENT_OUTPUT="${{ github.workspace }}/$UPWIND_AGENT"
-        # All binaries are pulled from US
-        UPWIND_AGENT_URL="https://releases.upwind.io/$UPWIND_AGENT/stable/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"
+        AGENT_OUTPUT="./$UPWIND_AGENT"
+        UPWIND_AGENT_URL="https://releases.${{ inputs.upwind_uri }}/$UPWIND_AGENT/stable/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"
 
         echo "Downloading from $UPWIND_AGENT_URL"
         curl -fsS -H "Authorization: Bearer $TOKEN" -L "$UPWIND_AGENT_URL" -o "$AGENT_OUTPUT"
@@ -150,7 +150,7 @@ runs:
           SUDO=sudo
         fi
   
-        $SUDO ${{ github.workspace }}/shiftleft image \
+        $SUDO ./shiftleft image \
           --source=GITHUB_ACTIONS \
           --initiator=${GITHUB_TRIGGERING_ACTOR} \
           --upwind-uri=${{ inputs.upwind_uri }} \
