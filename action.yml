@@ -47,8 +47,7 @@ inputs:
     type: boolean
   github_token:
     description: GitHub token for authentication
-    required: false
-    default: ${{ secrets.GITHUB_TOKEN }}
+    required: false    
   pr_number:
     description: Pull request number
     required: false
