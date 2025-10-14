@@ -316,7 +316,7 @@ runs:
         COMMENT_JSON=$(jq -n --arg body "$COMMENT" '{ body: $body }')
         curl -L \
           -X POST \
-          -H "Authorization: bearer $GH_TOKEN" \
+          -H "Authorization: Bearer $GH_TOKEN" \
           -H "Content-Type: application/json" \
           -H "X-GitHub-Api-Version: 2022-11-28" \
           -d "$COMMENT_JSON" \
