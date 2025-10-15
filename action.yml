@@ -53,6 +53,7 @@ inputs:
     required: false
   repo_name:
     description: The GitHub repository in owner/repo format
+    default: ${{ github.repository }}
     required: false
   add_comment:
     description: Whether to add a comment to the PR when a scan is completed
