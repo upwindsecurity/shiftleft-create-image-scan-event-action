@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - action.yml
+  workflow_dispatch:
 
 jobs:
   doc:
