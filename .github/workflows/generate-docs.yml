@@ -18,4 +18,4 @@ jobs:
 
       - uses: pndurette/gh-actions-auto-docs@v1
         with:
-          heading_size: 3
+          heading_size: 2
