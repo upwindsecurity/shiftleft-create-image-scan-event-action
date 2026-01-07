@@ -10,6 +10,29 @@ The Upwind Security ShiftLeft ShiftLeft Scan Event Publish Event Action enables 
 -	Upwind Credentials: Obtain your Upwind Client ID and Client Secret for authentication.
 
 <!--doc_begin-->
+### Inputs
+|Input|Description|Default|Required|
+|-----|-----------|-------|:------:|
+|`upwind_client_id`|Upwind Client ID|n/a|yes|
+|`upwind_client_secret`|Upwind Client Secret|n/a|yes|
+|`docker_image`|Already built docker image residing on same runner|n/a|yes|
+|`docker_user`|User to authenticate to the Docker registry|n/a|no|
+|`docker_password`|Password to authenticate to the Docker registry|n/a|no|
+|`pull_image`|Attempt to pull the image. Set to false if image is available locally|`True`|no|
+|`oci_client`|Client with which to pull image. Options are docker (default), podman, and skopeo|`docker`|no|
+|`additional_registries`|Comma-separated list of additional registries to associate with the scanned image, passed as a string|n/a|no|
+|`output_json`|File location to write JSON output to|`output.json`|no|
+|`commit_sha`|SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable|`${GITHUB_SHA}`|no|
+|`upwind_uri`|Public Upwind URI domain name|`upwind.io`|no|
+|`use_sudo`|whether to use sudo when invoking the scan to connect to the OCI client|`True`|no|
+|`github_token`|GitHub token for authentication|n/a|no|
+|`pr_number`|Pull request number|n/a|no|
+|`repo_name`|The GitHub repository in owner/repo format|n/a|no|
+|`add_comment`|Whether to add a comment to the PR when a scan is completed|`False`|no|
+|`debug`|Enable debug logging|`False`|no|
+|`block_on`|Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'|n/a|no|
+### Outputs
+None
 <!--doc_end-->
 
 ## Usage
