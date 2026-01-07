@@ -65,8 +65,6 @@ inputs:
     type: boolean
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
-  test_var:
-    description: Variable to test generate-docs github action
 
 runs:
   using: "composite"
