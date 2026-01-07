@@ -31,7 +31,6 @@ The Upwind Security ShiftLeft ShiftLeft Scan Event Publish Event Action enables 
 |`add_comment`|Whether to add a comment to the PR when a scan is completed|`False`|no|
 |`debug`|Enable debug logging|`False`|no|
 |`block_on`|Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'|n/a|no|
-|`test_var`|Variable to test generate-docs github action|n/a|no|
 ## Outputs
 None
 <!--doc_end-->
