@@ -95,3 +95,6 @@ This workflow triggers on pushes to the main branch, builds the Docker image, an
 -	Authentication Issues: Verify that your Upwind credentials are correct and have the necessary permissions.
 -	Docker Access: Ensure that the GitHub runner has the required permissions to access Docker.
 
+
+<!--doc_begin-->
+<!--doc_end-->
