@@ -10,7 +10,7 @@ The Upwind Security ShiftLeft ShiftLeft Scan Event Publish Event Action enables 
 -	Upwind Credentials: Obtain your Upwind Client ID and Client Secret for authentication.
 
 <!--doc_begin-->
-### Inputs
+## Inputs
 |Input|Description|Default|Required|
 |-----|-----------|-------|:------:|
 |`upwind_client_id`|Upwind Client ID|n/a|yes|
@@ -31,7 +31,7 @@ The Upwind Security ShiftLeft ShiftLeft Scan Event Publish Event Action enables 
 |`add_comment`|Whether to add a comment to the PR when a scan is completed|`False`|no|
 |`debug`|Enable debug logging|`False`|no|
 |`block_on`|Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'|n/a|no|
-### Outputs
+## Outputs
 None
 <!--doc_end-->
 
