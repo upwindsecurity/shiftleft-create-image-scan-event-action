@@ -130,7 +130,12 @@ runs:
 
         UPWIND_AGENT="shiftleft"
         AGENT_OUTPUT="./$UPWIND_AGENT"
-        UPWIND_AGENT_URL="https://releases.upwind.io/$UPWIND_AGENT/stable/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"
+        if [[ "${{ inputs.upwind_uri }}" == "upwind.dev" ]]; then
+          RELEASE_BUCKET="releases.upwind.dev"
+        else
+          RELEASE_BUCKET="releases.upwind.io"
+        fi
+        UPWIND_AGENT_URL="https://$RELEASE_BUCKET/$UPWIND_AGENT/stable/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"
 
         echo "Downloading from $UPWIND_AGENT_URL"
         curl -fsS -H "Authorization: Bearer $TOKEN" -L "$UPWIND_AGENT_URL" -o "$AGENT_OUTPUT"
