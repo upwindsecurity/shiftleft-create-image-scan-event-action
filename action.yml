@@ -17,6 +17,9 @@ inputs:
   docker_password:
     description: Password to authenticate to the Docker registry
     required: false
+  docker_config_path:
+    description: Path to the docker config directory to authenticate to the Docker registry
+    required: false
   pull_image:
     description: Attempt to pull the image. Set to false if image is available locally
     default: true
@@ -167,6 +170,7 @@ runs:
           --repository ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} \
           --docker-user="${{ inputs.docker_user }}" \
           --docker-password="${{ inputs.docker_password }}" \
+          --docker-config-path="${{ inputs.docker_config_path }}" \
           --debug=${{ inputs.debug }}  \
           --additional-registries="${{ inputs.additional_registries}}" \
           --docker-pull=${{ inputs.pull_image }} \
