@@ -1,0 +1,19 @@
+name: Generate Action Docs
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - README.md
+
+jobs:
+  doc:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: pndurette/gh-actions-auto-docs@v1
+        with:
+          heading_size: 2
