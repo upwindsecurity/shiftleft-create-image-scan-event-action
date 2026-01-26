@@ -65,6 +65,9 @@ inputs:
     type: boolean
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
+  s3_auth_endpoint:
+    description: Upwind S3 Auth Endpoint
+    default: oauth.upwind.io:443
 
 runs:
   using: "composite"
@@ -172,7 +175,8 @@ runs:
           --docker-pull=${{ inputs.pull_image }} \
           --output-json=$OUTPUT_JSON \
           --oci-client=${{ inputs.oci_client }} \
-          --block-on="${{ inputs.block_on}}"
+          --block-on="${{ inputs.block_on}}" \
+          --s3-auth-endpoint=${{ inputs.s3_auth_endpoint }}
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: $OUTPUT_JSON not found"
           exit 1
