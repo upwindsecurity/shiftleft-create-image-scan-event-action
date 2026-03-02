@@ -59,6 +59,10 @@ inputs:
     default: false
     required: false
     type: boolean
+  should_perform_multi_platform_scan:
+    description: Should perform multiplatform image scans or not
+    default: true
+    required: false
   debug:
     description: Enable debug logging
     default: false
@@ -172,6 +176,7 @@ runs:
           --docker-pull=${{ inputs.pull_image }} \
           --output-json=$OUTPUT_JSON \
           --oci-client=${{ inputs.oci_client }} \
+          --should-perform-multi-platform-scan=${{ inputs.should_perform_multi_platform_scan}} \
           --block-on="${{ inputs.block_on}}"
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: $OUTPUT_JSON not found"
