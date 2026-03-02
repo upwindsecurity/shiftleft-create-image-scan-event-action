@@ -25,6 +25,7 @@ Define the following inputs in your workflow to configure the ShiftLeft actions:
 - `additional_registries` (optional): Comma-separated list of additional registries to associate with the scanned image, passed as a string (String input)
 - `use_sudo` (optional): indicate whether the scanner should run with `sudo` to be able to access the image
 - `block_on` (optional): Block the workflow based on Upwind Scan Recommendation. Value can be either `do_not_deploy` or `deploy_with_caution`
+- `should_perform_multi_platform_scan` (optional): Whether to perform multi-architecture image scan for all platforms of the image or not
 
 ## Usage
 
