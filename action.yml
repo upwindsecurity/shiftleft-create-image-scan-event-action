@@ -59,6 +59,11 @@ inputs:
     default: false
     required: false
     type: boolean
+  perform_multiarchitecture_image_scan:
+    description: Whether to perform a multi-arch image scan or not, defaulted to true
+    default: true
+    required: false
+    type: boolean
   debug:
     description: Enable debug logging
     default: false
@@ -172,7 +177,8 @@ runs:
           --docker-pull=${{ inputs.pull_image }} \
           --output-json=$OUTPUT_JSON \
           --oci-client=${{ inputs.oci_client }} \
-          --block-on="${{ inputs.block_on}}"
+          --block-on="${{ inputs.block_on}}" \
+          --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}}
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: $OUTPUT_JSON not found"
           exit 1
