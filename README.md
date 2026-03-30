@@ -31,6 +31,7 @@ Define the following inputs in your workflow to configure the ShiftLeft actions:
 
 To integrate the ShiftLeft scanning action into your GitHub workflow, include the following step:
 
+
 ```
 - name: Upwind Security ShiftLeft Scanning
   uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
