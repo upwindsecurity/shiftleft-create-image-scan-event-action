@@ -66,7 +66,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v1
