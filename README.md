@@ -2,36 +2,47 @@
 
 ## Overview
 
-The Upwind Security ShiftLeft ShiftLeft Scan Event Publish Event Action enables seamless integration of Docker image vulnerability scanning into your CI/CD workflows. This action notifies the Upwind Console of a built image, before scanning for vulnerabilities.
+The Upwind Security ShiftLeft Create Image Scan Event Action enables seamless integration of Docker image vulnerability scanning into your CI/CD workflows. This action notifies the Upwind Console of a built image, scans it for vulnerabilities, and can optionally block the workflow or post the results back to a pull request.
+
+Under the hood it downloads the `shiftleft` binary from the Upwind release bucket (authenticating with your Upwind credentials) and runs its `image` subcommand against the supplied Docker image.
 
 ## Prerequisites
-- Currently supported architectures: `linux/amd64`.
--	Docker Environment: Ensure that the GitHub runner has access to Docker to build and manage images.
--	Upwind Credentials: Obtain your Upwind Client ID and Client Secret for authentication.
+- Supported runner architectures: `linux/amd64` and `linux/arm64`.
+- OCI client: Ensure the GitHub runner has access to an OCI client (`docker`, `podman`, or `skopeo`) to pull and inspect images. The selected client must be installed and available on the `PATH`.
+- Upwind Credentials: Obtain your Upwind Client ID and Client Secret for authentication.
 
 ## Inputs
 
-Define the following inputs in your workflow to configure the ShiftLeft actions:
+Define the following inputs in your workflow to configure the action:
 
--	`upwind_client_id` (required): Your Upwind Client ID.
--	`upwind_client_secret` (required): Your Upwind Client Secret.
-- `docker_image` (required): The Docker image to scan, which should reside on the same runner.
--	`docker_user` (optional): Username for authenticating to the Docker registry.
--	`docker_password` (optional): Password for authenticating to the Docker registry.
--	`pull_image` (optional): Boolean flag to determine if the image should be pulled. Set to false if the image is available locally. Default is true.
-- `oci_client` (optional): Which client should be used to pull the image. The default `docker` will use the docker daemon. Other options include `podman` and `skopeo`. Note that the binary must be installed and available on the path.
-- `output_json` (optional): path to output JSON results to
-- `commit_sha` (optional): SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable
-- `additional_registries` (optional): Comma-separated list of additional registries to associate with the scanned image, passed as a string (String input)
-- `use_sudo` (optional): indicate whether the scanner should run with `sudo` to be able to access the image
-- `block_on` (optional): Block the workflow based on Upwind Scan Recommendation. Value can be either `do_not_deploy` or `deploy_with_caution`
-- `perform_multiarchitecture_image_scan` (optional): Whether to perform multi-architecture image scan or not. Value can be either `true` or `false`, defaulting to `true`.
+| Input                                  | Required | Default         | Description                                                                                                                         |
+|----------------------------------------|----------|-----------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `upwind_client_id`                     | Yes      | –               | Your Upwind Client ID.                                                                                                              |
+| `upwind_client_secret`                 | Yes      | –               | Your Upwind Client Secret.                                                                                                          |
+| `docker_image`                         | Yes      | –               | The already-built Docker image to scan, residing on the same runner or with the full name of the registry                           |
+| `docker_user`                          | No       | –               | Username for authenticating to the Docker registry.                                                                                 |
+| `docker_password`                      | No       | –               | Password for authenticating to the Docker registry.                                                                                 |
+| `pull_image`                           | No       | `true`          | Whether to pull the image. Set to `false` if the image is already available locally.                                                |
+| `oci_client`                           | No       | `docker`        | Client used to pull the image. One of `docker`, `podman`, or `skopeo`. The binary must be installed and on the `PATH`.              |
+| `additional_registries`                | No       | –               | Comma-separated list of additional registries to associate with the scanned image.                                                  |
+| `output_json`                          | No       | `output.json`   | File location to write the JSON scan results to.                                                                                    |
+| `commit_sha`                           | No       | `${GITHUB_SHA}` | SHA to associate with the build. Defaults to the `GITHUB_SHA` environment variable.                                                 |
+| `upwind_uri`                           | No       | `upwind.io`     | Public Upwind URI domain name.                                                                                                      |
+| `use_sudo`                             | No       | `true`          | Whether to invoke the scan with `sudo` so it can connect to the OCI client.                                                         |
+| `perform_multiarchitecture_image_scan` | No       | `true`          | Whether to perform a multi-architecture image scan.                                                                                 |
+| `block_on`                             | No       | –               | Block the workflow based on the Upwind scan recommendation. One of `do_not_deploy` or `deploy_with_caution`.                        |
+| `add_comment`                          | No       | `false`         | Whether to post a summary comment to a pull request when the scan completes. Requires `github_token`, `pr_number`, and `repo_name`. |
+| `github_token`                         | No       | –               | GitHub token used to authenticate when posting the PR comment. Required when `add_comment` is `true`.                               |
+| `pr_number`                            | No       | –               | Pull request number to comment on. Required when `add_comment` is `true`.                                                           |
+| `repo_name`                            | No       | –               | The GitHub repository in `owner/repo` format. Required when `add_comment` is `true`.                                                |
+
+Sensitive values such as `upwind_client_id`, `upwind_client_secret`, and `docker_password` should be stored securely using GitHub Secrets.
 
 ## Usage
 
 To integrate the ShiftLeft scanning action into your GitHub workflow, include the following step:
 
-```
+```yaml
 - name: Upwind Security ShiftLeft Scanning
   uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
   with:
@@ -43,7 +54,25 @@ To integrate the ShiftLeft scanning action into your GitHub workflow, include th
     pull_image: false
 ```
 
-Ensure that sensitive information, such as `upwind_client_id`, `upwind_client_secret`, and `docker_password`, are stored securely using GitHub Secrets.
+### Commenting on a pull request
+
+Set `add_comment: true` to have the action post a Markdown summary of the scan (image, per-architecture status, and introduced CVEs grouped by severity) as a comment on a pull request. When `add_comment` is enabled, `github_token`, `pr_number`, and `repo_name` are all required — the action validates this up front and fails if any are missing.
+
+```yaml
+- name: Upwind Security ShiftLeft Scanning
+  uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
+  with:
+    upwind_client_id: ${{ secrets.UPWIND_CLIENT_ID }}
+    upwind_client_secret: ${{ secrets.UPWIND_CLIENT_SECRET }}
+    docker_image: 'your-docker-image:tag'
+    pull_image: false
+    add_comment: true
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    pr_number: ${{ github.event.pull_request.number }}
+    repo_name: ${{ github.repository }}
+```
+
+The job needs `pull-requests: write` permission for the token to post the comment.
 
 ## Versioning
 It is recommended that you track the `main` branch rather than a specified tag. This will ensure that you always have the most up to date version of the action.
@@ -52,7 +81,7 @@ It is recommended that you track the `main` branch rather than a specified tag. 
 
 Below is a sample GitHub Actions workflow that builds a Docker image and scans it using the Upwind Security ShiftLeft image scanner:
 
-```
+```yaml
 name: Docker Image Build and Scan
 
 on:
@@ -73,7 +102,7 @@ jobs:
 
       - name: Build Docker Image
         run: |
-          docker build . -t your-docker-image:tag
+          docker build . -t your-docker-image:${GITHUB_SHA}
 
       - name: Upwind Security ShiftLeft Scan
         uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
@@ -82,17 +111,11 @@ jobs:
           upwind_client_secret: ${{ secrets.UPWIND_CLIENT_SECRET }}
           docker_image: 'your-docker-image:${GITHUB_SHA}'
           pull_image: false
-      - name: Upwind Security ShiftLeft Image Publish
-        uses: upwindsecurity/shiftleft-create-image-publish-event-action@main
-        with:
-          upwind_client_id: ${{ secrets.UPWIND_CLIENT_ID }}
-          upwind_client_secret: ${{ secrets.UPWIND_CLIENT_SECRET }}
-          docker_image: 'your-docker-image:your-specified-version'
 ```
 
-This workflow triggers on pushes to the main branch, builds the Docker image, and then scans it for vulnerabilities using the CloudScanner action. The image does not need to be pulled because it is available locally via the Docker daemon. The
+This workflow triggers on pushes to the `main` branch, builds the Docker image, and then scans it for vulnerabilities. The image does not need to be pulled because it is available locally via the Docker daemon.
 
 ## Troubleshooting
--	Authentication Issues: Verify that your Upwind credentials are correct and have the necessary permissions.
--	Docker Access: Ensure that the GitHub runner has the required permissions to access Docker.
-
+- Authentication Issues: Verify that your Upwind credentials are correct and have the necessary permissions.
+- OCI Client Access: Ensure that the GitHub runner has the required permissions to access the selected OCI client (`docker`, `podman`, or `skopeo`). If the scan cannot reach the client, confirm whether `use_sudo` should be enabled for your runner.
+- PR Comment Failures: When using `add_comment: true`, ensure `github_token`, `pr_number`, and `repo_name` are all provided and that the token has `pull-requests: write` permission.
