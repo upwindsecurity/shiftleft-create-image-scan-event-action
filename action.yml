@@ -219,18 +219,29 @@ runs:
         COMMENT="# 🏄‍♂️ Upwind Image Scan Report"$'\n'
         COMMENT+="**Image:** \`$IMAGE_NAME:$IMAGE_VERSION\`"$'\n\n'
 
+        # Max CVE rows rendered per severity table (keeps the comment under
+        # GitHub's 65536-char limit on vulnerability-heavy images). Remaining
+        # CVEs are summarised with a "see Upwind Console" note.
+        MAX_ROWS=80
+
         # Loop through each architecture
         while IFS= read -r scan; do
           ARCH=$(echo "$scan" | jq -r '.arch? // ""')
             [ -z "$ARCH" ] && ARCH="arch not specified"
           STATUS=$(echo "$scan" | jq -r '.scanStatus // "unknown"')
 
-          T=$(echo "$scan" | jq '.introducedCves // [] | length')
-          N=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="introduced")] | length')
-          O=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="no_change")] | length')
-          H=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.severity=="HIGH")] | length')
-          C=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.severity=="CRITICAL")] | length')
-          OTHER=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))] | length')
+          # Full set of CVEs present in the image for this branch =
+          # newly introduced + already-present (no_change). This is the whole
+          # image, NOT just the diff vs the previously scanned image.
+          CVES=$(echo "$scan" | jq -c '(.introducedCves // []) + (.noChangeCves // [])')
+
+          T=$(echo "$CVES" | jq 'length')
+          N=$(echo "$scan" | jq '(.introducedCves // []) | length')
+          O=$(echo "$scan" | jq '(.noChangeCves // []) | length')
+          R=$(echo "$scan" | jq '(.resolvedCves // []) | length')
+          H=$(echo "$CVES" | jq '[.[] | select((.severity // "" | ascii_upcase)=="HIGH")] | length')
+          C=$(echo "$CVES" | jq '[.[] | select((.severity // "" | ascii_upcase)=="CRITICAL")] | length')
+          OTHER=$(echo "$CVES" | jq '[.[] | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))] | length')
 
           if [ "$T" -eq 0 ]; then
             CLEAN_ARCHES+="- \`$ARCH\` (status: \`$STATUS\`)"$'\n'
@@ -240,16 +251,17 @@ runs:
           # Header for this arch
           COMMENT+="## $ARCH"$'\n'
           COMMENT+="- **Status:** \`$STATUS\`"$'\n'
-          COMMENT+="- **Total CVEs:** \`$T\` (\`$N\` new, \`$O\` existing)"$'\n'
-          COMMENT+="- **Critical:** \`$C\`, **High:** \`$H\`"$'\n\n'
+          COMMENT+="- **Total CVEs in image:** \`$T\` (\`$N\` new since last scan · \`$O\` already present · \`$R\` resolved)"$'\n'
+          COMMENT+="- **Critical:** \`$C\`, **High:** \`$H\`, **Medium/Low/Other:** \`$OTHER\`"$'\n\n'
 
           build_table() {
-            local sev="$1" heading="$2" rows
+            local sev="$1" total rows
             if [ "$sev" = "OTHER" ]; then
+              total="$OTHER"
               # Everything not CRITICAL/HIGH (MEDIUM/LOW/UNKNOWN)
-              rows=$(echo "$scan" | jq -r '
-                [.introducedCves // [] | .[]
-                  | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))][]
+              rows=$(echo "$CVES" | jq -r --argjson max "$MAX_ROWS" '
+                [.[]
+                  | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))][0:$max][]
                 | [
                     (.cveId // .cveName // "<unknown>"),
                     ((.cveDescription // "")
@@ -258,14 +270,15 @@ runs:
                       | gsub("<"; "&lt;")
                       | gsub(">"; "&gt;")
                       | gsub("\r?\n"; " ")
-                      | .[0:400]),
+                      | .[0:240]),
                     ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
                   ]
                 | @tsv
               ')
             else
-              rows=$(echo "$scan" | jq -r --arg sev "$sev" '
-                [.introducedCves // [] | .[] | select((.severity // "" | ascii_upcase)==$sev)][]
+              total=$(echo "$CVES" | jq --arg sev "$sev" '[.[] | select((.severity // "" | ascii_upcase)==$sev)] | length')
+              rows=$(echo "$CVES" | jq -r --arg sev "$sev" --argjson max "$MAX_ROWS" '
+                [.[] | select((.severity // "" | ascii_upcase)==$sev)][0:$max][]
                 | [
                     (.cveId // .cveName // "<unknown>"),
                     ((.cveDescription // "")
@@ -274,14 +287,14 @@ runs:
                       | gsub("<"; "&lt;")
                       | gsub(">"; "&gt;")
                       | gsub("\r?\n"; " ")
-                      | .[0:400]),
+                      | .[0:240]),
                     ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
                   ]
                 | @tsv
               ')
             fi
             [ -z "$rows" ] && return 0
-            
+
             COMMENT+=$'| CVE | Description | Package |\n'
             COMMENT+=$'|---|---|---|\n'
             while IFS=$'\t' read -r CVE DESC PKG; do
@@ -289,19 +302,22 @@ runs:
               [ -z "${PKG}" ] && PKG="<pkg>"
               COMMENT+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
             done <<< "$rows"
+            if [ "$total" -gt "$MAX_ROWS" ]; then
+              COMMENT+="_…and $((total - MAX_ROWS)) more — see the full list in the Upwind Console._"$'\n'
+            fi
             COMMENT+=$'\n'
           }
 
           # CRITICAL table (visible if any)
           if [ "$C" -gt 0 ]; then
             COMMENT+=$'### Critical severity\n\n'
-            build_table "CRITICAL" "Critical severity"
+            build_table "CRITICAL"
           fi
 
           # HIGH table (visible if any)
           if [ "$H" -gt 0 ]; then
             COMMENT+=$'### High severity\n\n'
-            build_table "HIGH" "High severity"
+            build_table "HIGH"
           fi
 
           # OTHER severities in a collapsed details section
@@ -309,7 +325,7 @@ runs:
             COMMENT+=$'<details><summary><strong>Other severities</strong> (Medium/Low/Unknown) — '
             COMMENT+="\`$OTHER\` CVEs"
             COMMENT+=$'</summary>'$'\n\n'
-            build_table "OTHER" "Other severities"
+            build_table "OTHER"
             COMMENT+=$'</details>'$'\n\n'
           fi
         done < <(jq -c '.[]' "$ARRAY")
