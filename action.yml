@@ -219,10 +219,72 @@ runs:
         COMMENT="# 🏄‍♂️ Upwind Image Scan Report"$'\n'
         COMMENT+="**Image:** \`$IMAGE_NAME:$IMAGE_VERSION\`"$'\n\n'
 
-        # Max CVE rows rendered per severity table (keeps the comment under
-        # GitHub's 65536-char limit on vulnerability-heavy images). Remaining
-        # CVEs are summarised with a "see Upwind Console" note.
-        MAX_ROWS=80
+        # Caps that keep the comment under GitHub's 65536-char limit even for
+        # multi-arch, vulnerability-heavy images. MAX_ROWS bounds each severity
+        # table; COMMENT_BUDGET stops adding detail tables once we're close to
+        # the limit (per-arch summaries are always kept). TRUNCATED ensures the
+        # "truncated" note is added at most once.
+        MAX_ROWS=60
+        COMMENT_BUDGET=44000
+        TRUNCATED=0
+
+        # Append one severity table (heading + rows) for the current arch's
+        # $CVES to $COMMENT, honouring the size budget. $1 = CRITICAL|HIGH|OTHER.
+        build_table() {
+          local sev="$1" total rows heading collapse=0
+          case "$sev" in
+            CRITICAL) heading=$'### Critical severity'; total="$C" ;;
+            HIGH)     heading=$'### High severity'; total="$H" ;;
+            OTHER)    collapse=1; total="$OTHER" ;;
+          esac
+          [ "${total:-0}" -eq 0 ] && return 0
+
+          # Size guard: keep the per-arch summaries, drop detail tables once we
+          # are near the limit, and say so once.
+          if [ "${#COMMENT}" -gt "$COMMENT_BUDGET" ]; then
+            if [ "$TRUNCATED" -ne 1 ]; then
+              COMMENT+=$'_Detailed CVE tables were truncated to stay within GitHub\'s comment size limit — see the full list in the Upwind Console._\n\n'
+              TRUNCATED=1
+            fi
+            return 0
+          fi
+
+          if [ "$collapse" -eq 1 ]; then
+            # Everything not CRITICAL/HIGH (MEDIUM/LOW/UNKNOWN)
+            rows=$(echo "$CVES" | jq -r --argjson max "$MAX_ROWS" '
+              [.[] | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))][0:$max][]
+              | [ (.cveId // .cveName // "<unknown>"),
+                  ((.cveDescription // "") | gsub("\\|";"\\\\|") | gsub("`";"\\\\`") | gsub("<";"&lt;") | gsub(">";"&gt;") | gsub("\r?\n";" ") | .[0:240]),
+                  ((.packageName // "<pkg>") + " " + (.packageVersion // "")) ]
+              | @tsv')
+          else
+            rows=$(echo "$CVES" | jq -r --arg sev "$sev" --argjson max "$MAX_ROWS" '
+              [.[] | select((.severity // "" | ascii_upcase)==$sev)][0:$max][]
+              | [ (.cveId // .cveName // "<unknown>"),
+                  ((.cveDescription // "") | gsub("\\|";"\\\\|") | gsub("`";"\\\\`") | gsub("<";"&lt;") | gsub(">";"&gt;") | gsub("\r?\n";" ") | .[0:240]),
+                  ((.packageName // "<pkg>") + " " + (.packageVersion // "")) ]
+              | @tsv')
+          fi
+          [ -z "$rows" ] && return 0
+
+          if [ "$collapse" -eq 1 ]; then
+            COMMENT+="<details><summary><strong>Other severities</strong> (Medium/Low/Unknown) — \`$OTHER\` CVEs</summary>"$'\n\n'
+          else
+            COMMENT+="$heading"$'\n\n'
+          fi
+          COMMENT+=$'| CVE | Description | Package |\n'
+          COMMENT+=$'|---|---|---|\n'
+          while IFS=$'\t' read -r CVE DESC PKG; do
+            [ -z "${CVE}" ] && CVE="<unknown>"
+            [ -z "${PKG}" ] && PKG="<pkg>"
+            COMMENT+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
+          done <<< "$rows"
+          if [ "$total" -gt "$MAX_ROWS" ]; then
+            COMMENT+="_…and $((total - MAX_ROWS)) more — see the full list in the Upwind Console._"$'\n'
+          fi
+          [ "$collapse" -eq 1 ] && COMMENT+=$'</details>\n'
+          COMMENT+=$'\n'
+        }
 
         # Loop through each architecture
         while IFS= read -r scan; do
@@ -248,86 +310,15 @@ runs:
             continue
           fi
 
-          # Header for this arch
+          # Per-arch summary (always shown — this is the whole-image picture)
           COMMENT+="## $ARCH"$'\n'
           COMMENT+="- **Status:** \`$STATUS\`"$'\n'
           COMMENT+="- **Total CVEs in image:** \`$T\` (\`$N\` new since last scan · \`$O\` already present · \`$R\` resolved)"$'\n'
           COMMENT+="- **Critical:** \`$C\`, **High:** \`$H\`, **Medium/Low/Other:** \`$OTHER\`"$'\n\n'
 
-          build_table() {
-            local sev="$1" total rows
-            if [ "$sev" = "OTHER" ]; then
-              total="$OTHER"
-              # Everything not CRITICAL/HIGH (MEDIUM/LOW/UNKNOWN)
-              rows=$(echo "$CVES" | jq -r --argjson max "$MAX_ROWS" '
-                [.[]
-                  | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))][0:$max][]
-                | [
-                    (.cveId // .cveName // "<unknown>"),
-                    ((.cveDescription // "")
-                      | gsub("\\|"; "\\\\|")
-                      | gsub("`"; "\\\\`")
-                      | gsub("<"; "&lt;")
-                      | gsub(">"; "&gt;")
-                      | gsub("\r?\n"; " ")
-                      | .[0:240]),
-                    ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
-                  ]
-                | @tsv
-              ')
-            else
-              total=$(echo "$CVES" | jq --arg sev "$sev" '[.[] | select((.severity // "" | ascii_upcase)==$sev)] | length')
-              rows=$(echo "$CVES" | jq -r --arg sev "$sev" --argjson max "$MAX_ROWS" '
-                [.[] | select((.severity // "" | ascii_upcase)==$sev)][0:$max][]
-                | [
-                    (.cveId // .cveName // "<unknown>"),
-                    ((.cveDescription // "")
-                      | gsub("\\|"; "\\\\|")
-                      | gsub("`"; "\\\\`")
-                      | gsub("<"; "&lt;")
-                      | gsub(">"; "&gt;")
-                      | gsub("\r?\n"; " ")
-                      | .[0:240]),
-                    ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
-                  ]
-                | @tsv
-              ')
-            fi
-            [ -z "$rows" ] && return 0
-
-            COMMENT+=$'| CVE | Description | Package |\n'
-            COMMENT+=$'|---|---|---|\n'
-            while IFS=$'\t' read -r CVE DESC PKG; do
-              [ -z "${CVE}" ] && CVE="<unknown>"
-              [ -z "${PKG}" ] && PKG="<pkg>"
-              COMMENT+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
-            done <<< "$rows"
-            if [ "$total" -gt "$MAX_ROWS" ]; then
-              COMMENT+="_…and $((total - MAX_ROWS)) more — see the full list in the Upwind Console._"$'\n'
-            fi
-            COMMENT+=$'\n'
-          }
-
-          # CRITICAL table (visible if any)
-          if [ "$C" -gt 0 ]; then
-            COMMENT+=$'### Critical severity\n\n'
-            build_table "CRITICAL"
-          fi
-
-          # HIGH table (visible if any)
-          if [ "$H" -gt 0 ]; then
-            COMMENT+=$'### High severity\n\n'
-            build_table "HIGH"
-          fi
-
-          # OTHER severities in a collapsed details section
-          if [ "$OTHER" -gt 0 ]; then
-            COMMENT+=$'<details><summary><strong>Other severities</strong> (Medium/Low/Unknown) — '
-            COMMENT+="\`$OTHER\` CVEs"
-            COMMENT+=$'</summary>'$'\n\n'
-            build_table "OTHER"
-            COMMENT+=$'</details>'$'\n\n'
-          fi
+          build_table "CRITICAL"
+          build_table "HIGH"
+          build_table "OTHER"
         done < <(jq -c '.[]' "$ARRAY")
 
         # Collapsed list of totally clean arches (if any)
@@ -337,13 +328,22 @@ runs:
           COMMENT+=$'</details>'$'\n'
         fi
 
+        # Final hard safety net: never exceed GitHub's 65536-char comment limit.
+        if [ "${#COMMENT}" -gt 65000 ]; then
+          COMMENT="${COMMENT:0:64500}"$'\n\n_Comment truncated to fit GitHub\'s size limit — see the full results in the Upwind Console._'
+        fi
+
         echo "Posting summary comment on PR"
 
-        COMMENT_JSON=$(jq -n --arg body "$COMMENT" '{ body: $body }')
+        # Send the (potentially large) body via a file, never as a shell
+        # argument — a big --arg/-d would hit the OS arg-length limit
+        # ("Argument list too long") on multi-arch, CVE-heavy images.
+        PAYLOAD_FILE="$(mktemp)"
+        printf '%s' "$COMMENT" | jq -Rs '{ body: . }' > "$PAYLOAD_FILE"
         curl -L \
           -X POST \
           -H "Authorization: bearer $GH_TOKEN" \
           -H "Content-Type: application/json" \
           -H "X-GitHub-Api-Version: 2022-11-28" \
-          -d "$COMMENT_JSON" \
+          --data @"$PAYLOAD_FILE" \
           "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
