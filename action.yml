@@ -225,13 +225,13 @@ runs:
         # the limit (per-arch summaries are always kept). TRUNCATED ensures the
         # "truncated" note is added at most once.
         MAX_ROWS=60
-        COMMENT_BUDGET=44000
+        COMMENT_BUDGET=60000
         TRUNCATED=0
 
         # Append one severity table (heading + rows) for the current arch's
         # $CVES to $COMMENT, honouring the size budget. $1 = CRITICAL|HIGH|OTHER.
         build_table() {
-          local sev="$1" total rows heading collapse=0
+          local sev="$1" total rows heading collapse=0 buf=""
           case "$sev" in
             CRITICAL) heading=$'### Critical severity'; total="$C" ;;
             HIGH)     heading=$'### High severity'; total="$H" ;;
@@ -239,18 +239,7 @@ runs:
           esac
           [ "${total:-0}" -eq 0 ] && return 0
 
-          # Size guard: keep the per-arch summaries, drop detail tables once we
-          # are near the limit, and say so once.
-          if [ "${#COMMENT}" -gt "$COMMENT_BUDGET" ]; then
-            if [ "$TRUNCATED" -ne 1 ]; then
-              COMMENT+=$'_Detailed CVE tables were truncated to stay within GitHub\'s comment size limit — see the full list in the Upwind Console._\n\n'
-              TRUNCATED=1
-            fi
-            return 0
-          fi
-
           if [ "$collapse" -eq 1 ]; then
-            # Everything not CRITICAL/HIGH (MEDIUM/LOW/UNKNOWN)
             rows=$(echo "$CVES" | jq -r --argjson max "$MAX_ROWS" '
               [.[] | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))][0:$max][]
               | [ (.cveId // .cveName // "<unknown>"),
@@ -267,23 +256,35 @@ runs:
           fi
           [ -z "$rows" ] && return 0
 
+          # Build into a local buffer so we can measure before appending.
           if [ "$collapse" -eq 1 ]; then
-            COMMENT+="<details><summary><strong>Other severities</strong> (Medium/Low/Unknown) — \`$OTHER\` CVEs</summary>"$'\n\n'
+            buf+="<details><summary><strong>Other severities</strong> (Medium/Low/Unknown) — \`$OTHER\` CVEs</summary>"$'\n\n'
           else
-            COMMENT+="$heading"$'\n\n'
+            buf+="$heading"$'\n\n'
           fi
-          COMMENT+=$'| CVE | Description | Package |\n'
-          COMMENT+=$'|---|---|---|\n'
+          buf+=$'| CVE | Description | Package |\n'
+          buf+=$'|---|---|---|\n'
           while IFS=$'\t' read -r CVE DESC PKG; do
             [ -z "${CVE}" ] && CVE="<unknown>"
             [ -z "${PKG}" ] && PKG="<pkg>"
-            COMMENT+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
+            buf+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
           done <<< "$rows"
           if [ "$total" -gt "$MAX_ROWS" ]; then
-            COMMENT+="_…and $((total - MAX_ROWS)) more — see the full list in the Upwind Console._"$'\n'
+            buf+="_…and $((total - MAX_ROWS)) more — see the full list in the Upwind Console._"$'\n'
           fi
-          [ "$collapse" -eq 1 ] && COMMENT+=$'</details>\n'
-          COMMENT+=$'\n'
+          [ "$collapse" -eq 1 ] && buf+=$'</details>\n'
+          buf+=$'\n'
+
+          # Size guard: only append this table if it fits within the budget.
+          if [ $((${#COMMENT} + ${#buf})) -gt "$COMMENT_BUDGET" ]; then
+            if [ "$TRUNCATED" -ne 1 ]; then
+              COMMENT+=$'_Detailed CVE tables were truncated to stay within GitHub\'s comment size limit — see the full list in the Upwind Console._\n\n'
+              TRUNCATED=1
+            fi
+            return 0
+          fi
+
+          COMMENT+="$buf"
         }
 
         # Loop through each architecture
@@ -328,9 +329,19 @@ runs:
           COMMENT+=$'</details>'$'\n'
         fi
 
-        # Final hard safety net: never exceed GitHub's 65536-char comment limit.
+        # Final hard safety net: never exceed GitHub's 65536-char limit.
+        # Truncate at a newline boundary and close any unclosed <details> tags
+        # so the PR comment renders valid markdown.
         if [ "${#COMMENT}" -gt 65000 ]; then
-          COMMENT="${COMMENT:0:64500}"$'\n\n_Comment truncated to fit GitHub\'s size limit — see the full results in the Upwind Console._'
+          COMMENT="${COMMENT:0:64500}"
+          COMMENT="${COMMENT%$'\n'*}"
+          OPEN_TAGS=$(grep -c '<details>' <<< "$COMMENT" || true)
+          CLOSE_TAGS=$(grep -c '</details>' <<< "$COMMENT" || true)
+          while [ "$OPEN_TAGS" -gt "$CLOSE_TAGS" ]; do
+            COMMENT+=$'\n</details>'
+            CLOSE_TAGS=$((CLOSE_TAGS + 1))
+          done
+          COMMENT+=$'\n\n_Comment truncated to fit GitHub\'s size limit — see the full results in the Upwind Console._'
         fi
 
         echo "Posting summary comment on PR"
@@ -347,3 +358,4 @@ runs:
           -H "X-GitHub-Api-Version: 2022-11-28" \
           --data @"$PAYLOAD_FILE" \
           "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+        rm -f "$PAYLOAD_FILE"
