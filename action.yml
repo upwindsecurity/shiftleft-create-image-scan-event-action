@@ -325,6 +325,7 @@ runs:
 
         while IFS= read -r scan; do
           ARCH=$(echo "$scan" | jq -r '.arch? // ""')
+          STATUS=$(echo "$scan" | jq -r '.scanStatus // ""')
           INTRO=$(echo "$scan" | jq -c '.introducedCves // []')
           RESOLVED=$(echo "$scan" | jq -c '.resolvedCves // []')
           PRESENT=$(echo "$scan" | jq -c '(.introducedCves // []) + (.noChangeCves // [])')
@@ -338,8 +339,15 @@ runs:
           cL=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="LOW")] | length')
           cU=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase) as $s | ($s!="CRITICAL" and $s!="HIGH" and $s!="MEDIUM" and $s!="LOW"))] | length')
 
-          if [ "$ARCH_COUNT" -gt 1 ] && [ -n "$ARCH" ]; then
-            COMMENT+="## $ARCH"$'\n\n'
+          # Per-arch header + status.
+          if [ -n "$ARCH" ]; then
+            COMMENT+="## $ARCH"$'\n'
+          fi
+          if [ -n "$STATUS" ]; then
+            COMMENT+="- **Status:** \`$STATUS\`"$'\n'
+          fi
+          if [ -n "$ARCH" ] || [ -n "$STATUS" ]; then
+            COMMENT+=$'\n'
           fi
 
           # Summary line: counts only (introduced / resolved / total present).
