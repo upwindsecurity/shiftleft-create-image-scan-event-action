@@ -164,7 +164,6 @@ runs:
         OUTPUT_JSON: ${{ inputs.output_json }}
       run: |
         echo "Running Upwind Scan"
-        SCAN_START=$(date +%s)
         COMMIT_SHA=${GITHUB_SHA}
         if [[ -n "${{ inputs.commit_sha }}" ]]; then
           COMMIT_SHA=${{ inputs.commit_sha }}
@@ -214,15 +213,6 @@ runs:
         fi
 
         echo "Info: Image scan completed"
-
-        # Record human-readable scan duration for the PR comment.
-        SCAN_ELAPSED=$(( $(date +%s) - SCAN_START ))
-        if [ "$SCAN_ELAPSED" -ge 60 ]; then
-          SCAN_DURATION_HUMAN="$((SCAN_ELAPSED / 60))m $((SCAN_ELAPSED % 60))s"
-        else
-          SCAN_DURATION_HUMAN="${SCAN_ELAPSED}s"
-        fi
-        echo "SCAN_DURATION_HUMAN=${SCAN_DURATION_HUMAN}" >> "$GITHUB_ENV"
     - name: Comment on PR (conditional)
       shell: bash
       env:
@@ -231,7 +221,6 @@ runs:
         PR_NUMBER: ${{ inputs.pr_number }}
         ADD_COMMENT: ${{ inputs.add_comment }}
         OUTPUT_JSON: ${{ inputs.output_json }}
-        UPWIND_URI: ${{ inputs.upwind_uri }}
         MAIN_BRANCH: ${{ inputs.main_branch }}
       run: |
         if [ "$ADD_COMMENT" != "true" ]; then
@@ -273,26 +262,42 @@ runs:
         COMMENT+="**Image:** \`$IMAGE_NAME:$IMAGE_VERSION\`"$'\n\n'
 
         # Render a collapsible table of the given CVE JSON array (capped).
-        # $1=cves json  $2=summary line (already includes emoji/label/count)
+        # $1=cves json  $2=summary line  $3=with_fix ("1" to include a Fix column)
         emit_table() {
-          local cves_json="$1" summary="$2" rows
+          local cves_json="$1" summary="$2" with_fix="$3" rows total
           rows=$(echo "$cves_json" | jq -r --argjson max "$MAX_ROWS" '
             [.[]][0:$max][]
             | [ (.cveId // .cveName // "<unknown>"),
-                ((.cveDescription // "") | gsub("\\|";"\\\\|") | gsub("`";"\\\\`") | gsub("<";"&lt;") | gsub(">";"&gt;") | gsub("\r?\n";" ") | .[0:240]),
-                ((.packageName // "<pkg>") + " " + (.packageVersion // "")) ]
+                (.packageName // ""),
+                (.packageVersion // ""),
+                (.fixedInVersion // "") ]
             | @tsv')
-          local total
           total=$(echo "$cves_json" | jq 'length')
           COMMENT+="<details><summary>${summary}</summary>"$'\n\n'
-          COMMENT+=$'| CVE | Description | Package |\n|---|---|---|\n'
-          while IFS=$'\t' read -r CVE DESC PKG; do
+          if [ "$with_fix" = "1" ]; then
+            COMMENT+=$'| CVE | Package | Version | Fix |\n|---|---|---|---|\n'
+          else
+            COMMENT+=$'| CVE | Package | Version |\n|---|---|---|\n'
+          fi
+          while IFS=$'\t' read -r CVE PKG VER FIX; do
             [ -z "${CVE}" ] && CVE="<unknown>"
-            [ -z "${PKG}" ] && PKG="<pkg>"
-            COMMENT+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
+            # Link CVE ids to their NVD detail page.
+            case "$CVE" in
+              CVE-*) CVE_CELL="[${CVE}](https://nvd.nist.gov/vuln/detail/${CVE})" ;;
+              *)     CVE_CELL="${CVE}" ;;
+            esac
+            local pkg_cell="—" ver_cell="—" fix_cell="—"
+            [ -n "$PKG" ] && pkg_cell="\`${PKG}\`"
+            [ -n "$VER" ] && ver_cell="\`${VER}\`"
+            [ -n "$FIX" ] && fix_cell="\`${FIX}\`"
+            if [ "$with_fix" = "1" ]; then
+              COMMENT+="| ${CVE_CELL} | ${pkg_cell} | ${ver_cell} | ${fix_cell} |"$'\n'
+            else
+              COMMENT+="| ${CVE_CELL} | ${pkg_cell} | ${ver_cell} |"$'\n'
+            fi
           done <<< "$rows"
           if [ "$total" -gt "$MAX_ROWS" ]; then
-            COMMENT+="_…and $((total - MAX_ROWS)) more — see the Upwind Console._"$'\n'
+            COMMENT+="_…and $((total - MAX_ROWS)) more._"$'\n'
           fi
           COMMENT+=$'</details>\n\n'
         }
@@ -304,7 +309,7 @@ runs:
           [ "$n" -eq 0 ] && return 0
           sfx="s"; if [ "$n" -eq 1 ]; then sfx=""; fi
           emit_table "$(echo "$intro_json" | jq -c --arg s "$sev" '[.[] | select((.severity // "" | ascii_upcase)==$s)]')" \
-                     "${emoji} <strong>${label}</strong> · ${n} finding${sfx}"
+                     "${emoji} <strong>${label}</strong> · ${n} finding${sfx}" "1"
         }
 
         while IFS= read -r scan; do
@@ -349,17 +354,9 @@ runs:
           emit_introduced_sev "$INTRO" "LOW"      "🟢" "Low"
           if [ "$R" -gt 0 ]; then
             rsfx="s"; if [ "$R" -eq 1 ]; then rsfx=""; fi
-            emit_table "$RESOLVED" "✅ <strong>Resolved</strong> · ${R} finding${rsfx}"
+            emit_table "$RESOLVED" "✅ <strong>Resolved</strong> · ${R} finding${rsfx}" "0"
           fi
         done < <(jq -c '.[]' "$ARRAY")
-
-        # Console link + scan duration footer.
-        if [ -n "$FINGERPRINT" ]; then
-          COMMENT+="[View full analysis in Upwind Console](https://console.${UPWIND_URI:-upwind.io}/code?mainPageTab=Reviews&secondaryTab=SCA&sidePanel=scan-at-build&sidePanelItemId=${FINGERPRINT})"$'\n\n'
-        fi
-        if [ -n "${SCAN_DURATION_HUMAN:-}" ]; then
-          COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
-        fi
 
         # Final hard safety net: never exceed GitHub's 65536-char limit.
         if [ "${#COMMENT}" -gt 65000 ]; then
