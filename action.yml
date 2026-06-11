@@ -70,10 +70,10 @@ inputs:
     type: boolean
   main_branch:
     description: >-
-      Base/target branch to diff against (e.g. the PR's base branch, such as
-      ${{ github.event.pull_request.base.ref }}). When set, introduced/resolved
-      CVEs are computed vs the latest scanned image of this branch instead of
-      the previously scanned image. Requires that branch to have been scanned.
+      Base/target branch to diff against (e.g. the PR's base branch, typically
+      github.event.pull_request.base.ref). When set, introduced/resolved CVEs
+      are computed vs the latest scanned image of this branch instead of the
+      previously scanned image. Requires that branch to have been scanned.
     required: false
   pr_id:
     description: Pull request identifier associated with the scan (optional)
