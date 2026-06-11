@@ -68,6 +68,19 @@ inputs:
     description: Enable debug logging
     default: false
     type: boolean
+  main_branch:
+    description: >-
+      Base/target branch to diff against (e.g. the PR's base branch, typically
+      github.event.pull_request.base.ref). When set, introduced/resolved CVEs
+      are computed vs the latest scanned image of this branch instead of the
+      previously scanned image. Requires that branch to have been scanned.
+    required: false
+  pr_id:
+    description: Pull request identifier associated with the scan (optional)
+    required: false
+  pr_link:
+    description: Pull request URL associated with the scan (optional)
+    required: false
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
 
@@ -140,7 +153,7 @@ runs:
         else
           RELEASE_BUCKET="releases.upwind.io"
         fi
-        UPWIND_AGENT_URL="https://$RELEASE_BUCKET/$UPWIND_AGENT/stable/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"
+        UPWIND_AGENT_URL="https://$RELEASE_BUCKET/$UPWIND_AGENT/vsmain-test/$OS/$ARCH/$UPWIND_AGENT-$OS-$ARCH"  # TEST: versioned dev binary from shiftleft feat/image-scan-diff-vs-main
 
         echo "Downloading from $UPWIND_AGENT_URL"
         curl -fsS -H "Authorization: Bearer $TOKEN" -L "$UPWIND_AGENT_URL" -o "$AGENT_OUTPUT"
@@ -159,7 +172,21 @@ runs:
         if [ "${{ inputs.use_sudo }}" = "true" ]; then
           SUDO=sudo
         fi
-  
+
+        # Optional base-branch diff args. Only added when provided, so the
+        # command stays compatible with shiftleft binaries that predate these
+        # flags (they are passed only when the user opts in via main_branch).
+        EXTRA_ARGS=()
+        if [ -n "${{ inputs.main_branch }}" ]; then
+          EXTRA_ARGS+=(--main-branch="${{ inputs.main_branch }}")
+        fi
+        if [ -n "${{ inputs.pr_id }}" ]; then
+          EXTRA_ARGS+=(--pr-id="${{ inputs.pr_id }}")
+        fi
+        if [ -n "${{ inputs.pr_link }}" ]; then
+          EXTRA_ARGS+=(--pr-link="${{ inputs.pr_link }}")
+        fi
+
         $SUDO ./shiftleft image \
           --source=GITHUB_ACTIONS \
           --initiator=${GITHUB_TRIGGERING_ACTOR} \
@@ -178,7 +205,8 @@ runs:
           --output-json=$OUTPUT_JSON \
           --oci-client=${{ inputs.oci_client }} \
           --block-on="${{ inputs.block_on}}" \
-          --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}}
+          --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}} \
+          "${EXTRA_ARGS[@]}"
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: $OUTPUT_JSON not found"
           exit 1
