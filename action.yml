@@ -164,6 +164,7 @@ runs:
         OUTPUT_JSON: ${{ inputs.output_json }}
       run: |
         echo "Running Upwind Scan"
+        SCAN_START=$(date +%s)
         COMMIT_SHA=${GITHUB_SHA}
         if [[ -n "${{ inputs.commit_sha }}" ]]; then
           COMMIT_SHA=${{ inputs.commit_sha }}
@@ -213,6 +214,15 @@ runs:
         fi
 
         echo "Info: Image scan completed"
+
+        # Human-readable scan duration for the PR comment footer.
+        SCAN_ELAPSED=$(( $(date +%s) - SCAN_START ))
+        if [ "$SCAN_ELAPSED" -ge 60 ]; then
+          SCAN_DURATION_HUMAN="$((SCAN_ELAPSED / 60))m $((SCAN_ELAPSED % 60))s"
+        else
+          SCAN_DURATION_HUMAN="${SCAN_ELAPSED}s"
+        fi
+        echo "SCAN_DURATION_HUMAN=${SCAN_DURATION_HUMAN}" >> "$GITHUB_ENV"
     - name: Comment on PR (conditional)
       shell: bash
       env:
@@ -222,6 +232,7 @@ runs:
         ADD_COMMENT: ${{ inputs.add_comment }}
         OUTPUT_JSON: ${{ inputs.output_json }}
         MAIN_BRANCH: ${{ inputs.main_branch }}
+        UPWIND_URI: ${{ inputs.upwind_uri }}
       run: |
         if [ "$ADD_COMMENT" != "true" ]; then
           echo "Info: Skipping comment"
@@ -357,6 +368,14 @@ runs:
             emit_table "$RESOLVED" "✅ <strong>Resolved</strong> · ${R} finding${rsfx}" "0"
           fi
         done < <(jq -c '.[]' "$ARRAY")
+
+        # Footer: link to the full analysis in the Upwind Console + scan time.
+        if [ -n "$FINGERPRINT" ]; then
+          COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/code?mainPageTab=Reviews&secondaryTab=SCA&sidePanel=scan-at-build&sidePanelItemId=${FINGERPRINT})"$'\n\n'
+        fi
+        if [ -n "${SCAN_DURATION_HUMAN:-}" ]; then
+          COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
+        fi
 
         # Final hard safety net: never exceed GitHub's 65536-char limit.
         if [ "${#COMMENT}" -gt 65000 ]; then
