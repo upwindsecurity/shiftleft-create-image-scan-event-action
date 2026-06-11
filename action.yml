@@ -370,8 +370,8 @@ runs:
         done < <(jq -c '.[]' "$ARRAY")
 
         # Footer: link to the full analysis in the Upwind Console + scan time.
-        if [ -n "$FINGERPRINT" ]; then
-          COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/code?mainPageTab=Reviews&secondaryTab=SCA&sidePanel=scan-at-build&sidePanelItemId=${FINGERPRINT})"$'\n\n'
+        if [ -n "$IMAGE_VERSION" ] && [ "$IMAGE_VERSION" != "unknown" ]; then
+          COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/vulnerabilities?mainPageTab=Shift%20left&sidePanel=scan-at-build&sidePanelItemId=${IMAGE_VERSION})"$'\n\n'
         fi
         if [ -n "${SCAN_DURATION_HUMAN:-}" ]; then
           COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
