@@ -223,6 +223,12 @@ runs:
           SCAN_DURATION_HUMAN="${SCAN_ELAPSED}s"
         fi
         echo "SCAN_DURATION_HUMAN=${SCAN_DURATION_HUMAN}" >> "$GITHUB_ENV"
+
+        # Hand the resolved commit SHA to the comment step. We must export it
+        # here (not via the step's env: block) because inputs.commit_sha defaults
+        # to the literal "${GITHUB_SHA}", which GitHub Actions does not expand —
+        # only this inline shell context expands it to the real SHA.
+        echo "RESOLVED_COMMIT_SHA=${COMMIT_SHA}" >> "$GITHUB_ENV"
     - name: Comment on PR (conditional)
       shell: bash
       env:
@@ -233,7 +239,6 @@ runs:
         OUTPUT_JSON: ${{ inputs.output_json }}
         MAIN_BRANCH: ${{ inputs.main_branch }}
         UPWIND_URI: ${{ inputs.upwind_uri }}
-        COMMIT_SHA: ${{ inputs.commit_sha }}
       run: |
         if [ "$ADD_COMMENT" != "true" ]; then
           echo "Info: Skipping comment"
@@ -249,7 +254,9 @@ runs:
         HISTORY_PREFIX="<!-- upwind-scan-history:"
         HISTORY_MAX_ENTRIES=30
 
-        COMMIT_SHA="${COMMIT_SHA:-$GITHUB_SHA}"
+        # RESOLVED_COMMIT_SHA is exported by the scan step (already expanded);
+        # fall back to GITHUB_SHA if the scan step was skipped for any reason.
+        COMMIT_SHA="${RESOLVED_COMMIT_SHA:-$GITHUB_SHA}"
         COMMIT_URL="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/commit/${COMMIT_SHA}"
         SCANNED_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
 
