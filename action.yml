@@ -233,11 +233,25 @@ runs:
         OUTPUT_JSON: ${{ inputs.output_json }}
         MAIN_BRANCH: ${{ inputs.main_branch }}
         UPWIND_URI: ${{ inputs.upwind_uri }}
+        COMMIT_SHA: ${{ inputs.commit_sha }}
       run: |
         if [ "$ADD_COMMENT" != "true" ]; then
           echo "Info: Skipping comment"
           exit 0
         fi
+
+        # Stable marker identifying *our* comment on this PR. We edit the comment
+        # carrying this marker in place across commits instead of posting a new
+        # one each run (mirrors the SCA/IaC "scan history" behaviour, which the
+        # shiftleft-server backend does DB-side; here we have no DB, so the prior
+        # history is carried inside the comment as a hidden base64 state blob).
+        COMMENT_MARKER="<!-- upwind-image-scan-report -->"
+        HISTORY_PREFIX="<!-- upwind-scan-history:"
+        HISTORY_MAX_ENTRIES=30
+
+        COMMIT_SHA="${COMMIT_SHA:-$GITHUB_SHA}"
+        COMMIT_URL="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/commit/${COMMIT_SHA}"
+        SCANNED_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
 
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: Output file not found: $OUTPUT_JSON"
@@ -269,7 +283,12 @@ runs:
 
         MAX_ROWS=60
 
-        COMMENT="# 🏄‍♂️ Upwind Image Scan Report"$'\n'
+        # Totals across all architectures, recorded as this run's history entry.
+        TOTAL_NEW=0
+        TOTAL_RESOLVED=0
+
+        COMMENT="${COMMENT_MARKER}"$'\n'
+        COMMENT+="# 🏄‍♂️ Upwind Image Scan Report"$'\n'
         COMMENT+="**Image:** \`$IMAGE_NAME:$IMAGE_VERSION\`"$'\n\n'
 
         # Render a collapsible table of the given CVE JSON array (capped).
@@ -333,6 +352,8 @@ runs:
           N=$(echo "$INTRO" | jq 'length')
           R=$(echo "$RESOLVED" | jq 'length')
           T=$(echo "$PRESENT" | jq 'length')
+          TOTAL_NEW=$((TOTAL_NEW + N))
+          TOTAL_RESOLVED=$((TOTAL_RESOLVED + R))
           cC=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="CRITICAL")] | length')
           cH=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="HIGH")] | length')
           cM=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="MEDIUM")] | length')
@@ -385,9 +406,83 @@ runs:
           COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
         fi
 
-        # Final hard safety net: never exceed GitHub's 65536-char limit.
-        if [ "${#COMMENT}" -gt 65000 ]; then
-          COMMENT="${COMMENT:0:64500}"
+        # --- Sticky comment + scan history ------------------------------------
+        # Locate any prior comment of ours on this PR (by marker) and recover the
+        # accumulated scan history it carries, so we edit it in place and append
+        # to history instead of posting a fresh comment on every commit.
+        AUTH_HDR="Authorization: bearer $GH_TOKEN"
+        API="https://api.github.com/repos/$REPO"
+
+        EXISTING_ID=""
+        PRIOR_HISTORY="[]"
+        page=1
+        while [ "$page" -le 10 ]; do
+          PAGE_JSON=$(curl -fsSL \
+            -H "$AUTH_HDR" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$API/issues/$PR_NUMBER/comments?per_page=100&page=$page" 2>/dev/null || echo "[]")
+          [ "$(echo "$PAGE_JSON" | jq 'length')" -eq 0 ] && break
+
+          MATCH=$(echo "$PAGE_JSON" | jq -c --arg m "$COMMENT_MARKER" \
+            'map(select(.body | contains($m))) | .[0] // empty')
+          if [ -n "$MATCH" ]; then
+            EXISTING_ID=$(echo "$MATCH" | jq -r '.id')
+            # Recover the hidden base64 history blob from the prior comment body.
+            PRIOR_B64=$(echo "$MATCH" | jq -r '.body' \
+              | sed -n "s/.*${HISTORY_PREFIX}\([A-Za-z0-9+/=]*\) -->.*/\1/p" | head -n1)
+            if [ -n "$PRIOR_B64" ]; then
+              DECODED=$(printf '%s' "$PRIOR_B64" | base64 -d 2>/dev/null || echo "")
+              if echo "$DECODED" | jq -e 'type=="array"' >/dev/null 2>&1; then
+                PRIOR_HISTORY="$DECODED"
+              fi
+            fi
+            break
+          fi
+          page=$((page + 1))
+        done
+
+        # Append this run as the newest history entry (keep only the last N).
+        HISTORY_JSON=$(echo "$PRIOR_HISTORY" | jq -c \
+          --arg sha "$COMMIT_SHA" \
+          --arg url "$COMMIT_URL" \
+          --arg ts "$SCANNED_AT" \
+          --argjson new "$TOTAL_NEW" \
+          --argjson resolved "$TOTAL_RESOLVED" \
+          --argjson max "$HISTORY_MAX_ENTRIES" \
+          '. + [{sha: $sha, url: $url, ts: $ts, new: $new, resolved: $resolved}] | .[-$max:]')
+
+        # Render the visible "Scan history" section from the accumulated entries.
+        HISTORY_MD=$(echo "$HISTORY_JSON" | jq -r '
+          (length) as $n |
+          (if $n == 1 then "scan" else "scans" end) as $noun |
+          "---\n\n<details>\n<summary>Scan history (\($n) \($noun))</summary>\n\n"
+          + "| Commit | Scanned at | New | Resolved | Net |\n"
+          + "|--------|------------|-----|----------|-----|\n"
+          + ([ to_entries[]
+               | .key as $i | .value as $e
+               | (if $i == ($n - 1) then " <" else "" end) as $latest
+               | (if $e.new > 0 then "+\($e.new)" else "0" end) as $newc
+               | (if $e.resolved > 0 then "-\($e.resolved)" else "0" end) as $resc
+               | ($e.new - $e.resolved) as $net
+               | (if $net > 0 then "+\($net)" else "\($net)" end) as $netc
+               | "| [`\($e.sha[0:7])`](\($e.url))\($latest) | \($e.ts) | \($newc) | \($resc) | \($netc) |"
+             ] | join("\n"))
+          + "\n\n</details>\n\n"
+          + (.[-1] | "_Last scanned: [`\(.sha[0:7])`](\(.url)) · \(.ts)_\n")
+        ')
+
+        COMMENT+="$HISTORY_MD"
+
+        # Hidden state blob: source of truth for the next run's history table.
+        HISTORY_B64=$(printf '%s' "$HISTORY_JSON" | base64 | tr -d '\n')
+        HIDDEN_STATE=$'\n'"${HISTORY_PREFIX}${HISTORY_B64} -->"$'\n'
+
+        # Hard safety net: never exceed GitHub's 65536-char limit. Truncate the
+        # visible body only, reserving room for the hidden state which must stay
+        # intact (it is what the next run reads to rebuild the full history).
+        CAP=$((65000 - ${#HIDDEN_STATE}))
+        if [ "${#COMMENT}" -gt "$CAP" ]; then
+          COMMENT="${COMMENT:0:$((CAP - 500))}"
           COMMENT="${COMMENT%$'\n'*}"
           OPEN_TAGS=$(grep -c '<details>' <<< "$COMMENT" || true)
           CLOSE_TAGS=$(grep -c '</details>' <<< "$COMMENT" || true)
@@ -397,17 +492,28 @@ runs:
           done
           COMMENT+=$'\n\n_Comment truncated to fit GitHub\'s size limit — see the Upwind Console._'
         fi
-
-        echo "Posting summary comment on PR"
+        COMMENT+="$HIDDEN_STATE"
 
         # Send the body via a file, never as a shell argument.
         PAYLOAD_FILE="$(mktemp)"
         printf '%s' "$COMMENT" | jq -Rs '{ body: . }' > "$PAYLOAD_FILE"
-        curl -L \
-          -X POST \
-          -H "Authorization: bearer $GH_TOKEN" \
-          -H "Content-Type: application/json" \
-          -H "X-GitHub-Api-Version: 2022-11-28" \
-          --data @"$PAYLOAD_FILE" \
-          "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+        if [ -n "$EXISTING_ID" ]; then
+          echo "Updating existing PR comment ($EXISTING_ID) with new scan + history"
+          curl -L \
+            -X PATCH \
+            -H "$AUTH_HDR" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data @"$PAYLOAD_FILE" \
+            "$API/issues/comments/$EXISTING_ID"
+        else
+          echo "Posting new summary comment on PR"
+          curl -L \
+            -X POST \
+            -H "$AUTH_HDR" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data @"$PAYLOAD_FILE" \
+            "$API/issues/$PR_NUMBER/comments"
+        fi
         rm -f "$PAYLOAD_FILE"
