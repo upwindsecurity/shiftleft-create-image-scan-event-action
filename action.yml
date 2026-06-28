@@ -399,6 +399,15 @@ runs:
           emit_introduced_sev "$INTRO" "HIGH"     "🔶" "High"
           emit_introduced_sev "$INTRO" "MEDIUM"   "🟡" "Medium"
           emit_introduced_sev "$INTRO" "LOW"      "🟢" "Low"
+          # Catch-all for introduced findings outside C/H/M/L (UNKNOWN etc),
+          # else they'd be counted in N but listed nowhere (as SCA/IaC do).
+          OTHER_FILTER='[.[] | select((.severity // "" | ascii_upcase) as $s | ($s!="CRITICAL" and $s!="HIGH" and $s!="MEDIUM" and $s!="LOW"))]'
+          nO=$(echo "$INTRO" | jq "$OTHER_FILTER | length")
+          if [ "$nO" -gt 0 ]; then
+            osfx="s"; if [ "$nO" -eq 1 ]; then osfx=""; fi
+            emit_table "$(echo "$INTRO" | jq -c "$OTHER_FILTER")" \
+                       "⚪ <strong>Other</strong> · ${nO} finding${osfx}" "1"
+          fi
           if [ "$R" -gt 0 ]; then
             rsfx="s"; if [ "$R" -eq 1 ]; then rsfx=""; fi
             emit_table "$RESOLVED" "✅ <strong>Resolved</strong> · ${R} finding${rsfx}" "0"
