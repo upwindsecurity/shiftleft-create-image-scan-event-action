@@ -162,6 +162,9 @@ runs:
       shell: bash
       env:
         OUTPUT_JSON: ${{ inputs.output_json }}
+        MAIN_BRANCH: ${{ inputs.main_branch }}
+        PR_ID: ${{ inputs.pr_id }}
+        PR_LINK: ${{ inputs.pr_link }}
       run: |
         echo "Running Upwind Scan"
         SCAN_START=$(date +%s)
@@ -178,14 +181,14 @@ runs:
         # command stays compatible with shiftleft binaries that predate these
         # flags (they are passed only when the user opts in via main_branch).
         EXTRA_ARGS=()
-        if [ -n "${{ inputs.main_branch }}" ]; then
-          EXTRA_ARGS+=(--main-branch="${{ inputs.main_branch }}")
+        if [ -n "$MAIN_BRANCH" ]; then
+          EXTRA_ARGS+=(--main-branch="$MAIN_BRANCH")
         fi
-        if [ -n "${{ inputs.pr_id }}" ]; then
-          EXTRA_ARGS+=(--pr-id="${{ inputs.pr_id }}")
+        if [ -n "$PR_ID" ]; then
+          EXTRA_ARGS+=(--pr-id="$PR_ID")
         fi
-        if [ -n "${{ inputs.pr_link }}" ]; then
-          EXTRA_ARGS+=(--pr-link="${{ inputs.pr_link }}")
+        if [ -n "$PR_LINK" ]; then
+          EXTRA_ARGS+=(--pr-link="$PR_LINK")
         fi
 
         $SUDO ./shiftleft image \
@@ -355,6 +358,9 @@ runs:
           INTRO=$(echo "$scan" | jq -c '.introducedCves // []')
           RESOLVED=$(echo "$scan" | jq -c '.resolvedCves // []')
           PRESENT=$(echo "$scan" | jq -c '(.introducedCves // []) + (.noChangeCves // [])')
+          # Empty when the base branch has never been scanned (first-seen image):
+          # the scanner has no baseline, so every present CVE is tagged "introduced".
+          COMPARE_TO=$(echo "$scan" | jq -r '.compareTo // ""')
 
           N=$(echo "$INTRO" | jq 'length')
           R=$(echo "$RESOLVED" | jq 'length')
@@ -379,8 +385,16 @@ runs:
           fi
 
           # Summary line: counts only (introduced / resolved / total present).
-          ivword="vulnerabilities"; if [ "$N" -eq 1 ]; then ivword="vulnerability"; fi
-          COMMENT+="**${N}** newly introduced ${ivword} · **${R}** resolved · **${T}** total in this PR vs ${BASE_LABEL}"$'\n'
+          # With no baseline yet, introduced/resolved aren't meaningful (everything
+          # is tagged introduced) — report the full inventory instead of a
+          # misleading "N newly introduced vs main".
+          if [ -n "$MAIN_BRANCH" ] && [ -z "$COMPARE_TO" ]; then
+            tvword="vulnerabilities"; if [ "$T" -eq 1 ]; then tvword="vulnerability"; fi
+            COMMENT+="**${T}** total ${tvword} · no baseline scan for ${BASE_LABEL} yet — showing full inventory (introduced/resolved vs ${BASE_LABEL} will appear once it has been scanned)"$'\n'
+          else
+            ivword="vulnerabilities"; if [ "$N" -eq 1 ]; then ivword="vulnerability"; fi
+            COMMENT+="**${N}** newly introduced ${ivword} · **${R}** resolved · **${T}** total in this PR vs ${BASE_LABEL}"$'\n'
+          fi
 
           # Severity breakdown of the total present (counts only, not listed).
           BREAK=""
