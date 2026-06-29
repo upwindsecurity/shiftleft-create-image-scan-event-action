@@ -162,6 +162,9 @@ runs:
       shell: bash
       env:
         OUTPUT_JSON: ${{ inputs.output_json }}
+        MAIN_BRANCH: ${{ inputs.main_branch }}
+        PR_ID: ${{ inputs.pr_id }}
+        PR_LINK: ${{ inputs.pr_link }}
       run: |
         echo "Running Upwind Scan"
         SCAN_START=$(date +%s)
@@ -177,14 +180,14 @@ runs:
         # Optional base-branch diff args; added only when set (back-compat
         # with shiftleft binaries that predate these flags).
         EXTRA_ARGS=()
-        if [ -n "${{ inputs.main_branch }}" ]; then
-          EXTRA_ARGS+=(--main-branch="${{ inputs.main_branch }}")
+        if [ -n "$MAIN_BRANCH" ]; then
+          EXTRA_ARGS+=(--main-branch="$MAIN_BRANCH")
         fi
-        if [ -n "${{ inputs.pr_id }}" ]; then
-          EXTRA_ARGS+=(--pr-id="${{ inputs.pr_id }}")
+        if [ -n "$PR_ID" ]; then
+          EXTRA_ARGS+=(--pr-id="$PR_ID")
         fi
-        if [ -n "${{ inputs.pr_link }}" ]; then
-          EXTRA_ARGS+=(--pr-link="${{ inputs.pr_link }}")
+        if [ -n "$PR_LINK" ]; then
+          EXTRA_ARGS+=(--pr-link="$PR_LINK")
         fi
 
         $SUDO ./shiftleft image \
