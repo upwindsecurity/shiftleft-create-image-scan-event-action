@@ -350,6 +350,9 @@ runs:
           INTRO=$(echo "$scan" | jq -c '.introducedCves // []')
           RESOLVED=$(echo "$scan" | jq -c '.resolvedCves // []')
           PRESENT=$(echo "$scan" | jq -c '(.introducedCves // []) + (.noChangeCves // [])')
+          # Empty when the base branch has never been scanned (first-seen image):
+          # the scanner has no baseline, so every present CVE is tagged "introduced".
+          COMPARE_TO=$(echo "$scan" | jq -r '.compareTo // ""')
 
           N=$(echo "$INTRO" | jq 'length')
           R=$(echo "$RESOLVED" | jq 'length')
@@ -373,9 +376,16 @@ runs:
             COMMENT+=$'\n'
           fi
 
-          # Summary line (counts only).
-          ivword="vulnerabilities"; if [ "$N" -eq 1 ]; then ivword="vulnerability"; fi
-          COMMENT+="**${N}** newly introduced ${ivword} · **${R}** resolved · **${T}** total in this PR vs ${BASE_LABEL}"$'\n'
+          # Summary line (counts only). With no baseline yet, introduced/resolved
+          # aren't meaningful (everything is tagged introduced) — report the full
+          # inventory instead of a misleading "N newly introduced vs main".
+          if [ -n "$MAIN_BRANCH" ] && [ -z "$COMPARE_TO" ]; then
+            tvword="vulnerabilities"; if [ "$T" -eq 1 ]; then tvword="vulnerability"; fi
+            COMMENT+="**${T}** total ${tvword} · no baseline scan for ${BASE_LABEL} yet — showing full inventory (introduced/resolved vs ${BASE_LABEL} will appear once it has been scanned)"$'\n'
+          else
+            ivword="vulnerabilities"; if [ "$N" -eq 1 ]; then ivword="vulnerability"; fi
+            COMMENT+="**${N}** newly introduced ${ivword} · **${R}** resolved · **${T}** total in this PR vs ${BASE_LABEL}"$'\n'
+          fi
 
           # Severity breakdown of total present.
           BREAK=""
