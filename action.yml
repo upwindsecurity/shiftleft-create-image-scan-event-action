@@ -68,6 +68,19 @@ inputs:
     description: Enable debug logging
     default: false
     type: boolean
+  main_branch:
+    description: >-
+      Base/target branch to diff against (e.g. the PR's base branch, typically
+      github.event.pull_request.base.ref). When set, introduced/resolved CVEs
+      are computed vs the latest scanned image of this branch instead of the
+      previously scanned image. Requires that branch to have been scanned.
+    required: false
+  pr_id:
+    description: Pull request identifier associated with the scan (optional)
+    required: false
+  pr_link:
+    description: Pull request URL associated with the scan (optional)
+    required: false
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
 
@@ -149,8 +162,12 @@ runs:
       shell: bash
       env:
         OUTPUT_JSON: ${{ inputs.output_json }}
+        MAIN_BRANCH: ${{ inputs.main_branch }}
+        PR_ID: ${{ inputs.pr_id }}
+        PR_LINK: ${{ inputs.pr_link }}
       run: |
         echo "Running Upwind Scan"
+        SCAN_START=$(date +%s)
         COMMIT_SHA=${GITHUB_SHA}
         if [[ -n "${{ inputs.commit_sha }}" ]]; then
           COMMIT_SHA=${{ inputs.commit_sha }}
@@ -159,7 +176,20 @@ runs:
         if [ "${{ inputs.use_sudo }}" = "true" ]; then
           SUDO=sudo
         fi
-  
+
+        # Optional base-branch diff args; added only when set (back-compat
+        # with shiftleft binaries that predate these flags).
+        EXTRA_ARGS=()
+        if [ -n "$MAIN_BRANCH" ]; then
+          EXTRA_ARGS+=(--main-branch="$MAIN_BRANCH")
+        fi
+        if [ -n "$PR_ID" ]; then
+          EXTRA_ARGS+=(--pr-id="$PR_ID")
+        fi
+        if [ -n "$PR_LINK" ]; then
+          EXTRA_ARGS+=(--pr-link="$PR_LINK")
+        fi
+
         $SUDO ./shiftleft image \
           --source=GITHUB_ACTIONS \
           --initiator=${GITHUB_TRIGGERING_ACTOR} \
@@ -178,13 +208,27 @@ runs:
           --output-json=$OUTPUT_JSON \
           --oci-client=${{ inputs.oci_client }} \
           --block-on="${{ inputs.block_on}}" \
-          --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}}
+          --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}} \
+          "${EXTRA_ARGS[@]}"
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: $OUTPUT_JSON not found"
           exit 1
         fi
 
         echo "Info: Image scan completed"
+
+        # Scan duration for the comment footer.
+        SCAN_ELAPSED=$(( $(date +%s) - SCAN_START ))
+        if [ "$SCAN_ELAPSED" -ge 60 ]; then
+          SCAN_DURATION_HUMAN="$((SCAN_ELAPSED / 60))m $((SCAN_ELAPSED % 60))s"
+        else
+          SCAN_DURATION_HUMAN="${SCAN_ELAPSED}s"
+        fi
+        echo "SCAN_DURATION_HUMAN=${SCAN_DURATION_HUMAN}" >> "$GITHUB_ENV"
+
+        # Export the resolved SHA for the comment step: inputs.commit_sha
+        # defaults to a literal "${GITHUB_SHA}" only this inline shell expands.
+        echo "RESOLVED_COMMIT_SHA=${COMMIT_SHA}" >> "$GITHUB_ENV"
     - name: Comment on PR (conditional)
       shell: bash
       env:
@@ -193,141 +237,301 @@ runs:
         PR_NUMBER: ${{ inputs.pr_number }}
         ADD_COMMENT: ${{ inputs.add_comment }}
         OUTPUT_JSON: ${{ inputs.output_json }}
+        MAIN_BRANCH: ${{ inputs.main_branch }}
+        UPWIND_URI: ${{ inputs.upwind_uri }}
       run: |
         if [ "$ADD_COMMENT" != "true" ]; then
           echo "Info: Skipping comment"
           exit 0
         fi
 
+        # Marker for our sticky comment: we edit it in place each run. With no
+        # DB (unlike SCA/IaC), history lives in a hidden base64 blob in the body.
+        COMMENT_MARKER="<!-- upwind-image-scan-report -->"
+        HISTORY_PREFIX="<!-- upwind-scan-history:"
+        HISTORY_MAX_ENTRIES=30
+
+        # From the scan step (already expanded); fall back if it was skipped.
+        COMMIT_SHA="${RESOLVED_COMMIT_SHA:-$GITHUB_SHA}"
+        COMMIT_URL="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/commit/${COMMIT_SHA}"
+        SCANNED_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
+
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: Output file not found: $OUTPUT_JSON"
           exit 1
         fi
 
-        # Normalise JSON
+        # Normalise the scan output into a JSON array.
         ARRAY="$(mktemp)"
-
-        # Create an array from stream of valid json objects
         jq -cs 'if type=="array" then . else [.] end' "$OUTPUT_JSON" > "$ARRAY"
 
-        CLEAN_ARCHES=""
+        # Skip rather than post an "unknown:unknown" placeholder on no data.
+        if [ "$(jq '[.[] | select((.imageName // "") != "")] | length' "$ARRAY")" -eq 0 ]; then
+          echo "Warning: scan results not ready (empty output); skipping comment"
+          exit 0
+        fi
 
-        # Build base comment
         IMAGE_NAME=$(jq -r '.[0].imageName // "unknown"' "$ARRAY")
         IMAGE_VERSION=$(jq -r '.[0].imageVersion // "unknown"' "$ARRAY")
+        FINGERPRINT=$(jq -r '.[0].fingerprint // ""' "$ARRAY")
+        ARCH_COUNT=$(jq 'length' "$ARRAY")
 
-        COMMENT="# 🏄‍♂️ Upwind Image Scan Report"$'\n'
+        # Label for what the diff is against.
+        if [ -n "$MAIN_BRANCH" ]; then
+          BASE_LABEL="\`${MAIN_BRANCH#refs/heads/}\`"
+        else
+          BASE_LABEL="the previous scan"
+        fi
+
+        MAX_ROWS=60
+
+        # Totals across arches; recorded as this run's history entry.
+        TOTAL_NEW=0
+        TOTAL_RESOLVED=0
+
+        COMMENT="${COMMENT_MARKER}"$'\n'
+        COMMENT+="# 🏄‍♂️ Upwind Image Scan Report"$'\n'
         COMMENT+="**Image:** \`$IMAGE_NAME:$IMAGE_VERSION\`"$'\n\n'
 
-        # Loop through each architecture
+        # Collapsible CVE table (capped).
+        # $1=cves json  $2=summary  $3=with_fix ("1" adds a Fix column)
+        emit_table() {
+          local cves_json="$1" summary="$2" with_fix="$3" rows total
+          rows=$(echo "$cves_json" | jq -r --argjson max "$MAX_ROWS" '
+            [.[]][0:$max][]
+            | [ (.cveId // .cveName // "<unknown>"),
+                (.packageName // ""),
+                (.packageVersion // ""),
+                (.fixedInVersion // "") ]
+            | @tsv')
+          total=$(echo "$cves_json" | jq 'length')
+          COMMENT+="<details><summary>${summary}</summary>"$'\n\n'
+          if [ "$with_fix" = "1" ]; then
+            COMMENT+=$'| CVE | Package | Version | Fix |\n|---|---|---|---|\n'
+          else
+            COMMENT+=$'| CVE | Package | Version |\n|---|---|---|\n'
+          fi
+          while IFS=$'\t' read -r CVE PKG VER FIX; do
+            [ -z "${CVE}" ] && CVE="<unknown>"
+            # Link CVE ids to NVD.
+            case "$CVE" in
+              CVE-*) CVE_CELL="[${CVE}](https://nvd.nist.gov/vuln/detail/${CVE})" ;;
+              *)     CVE_CELL="${CVE}" ;;
+            esac
+            local pkg_cell="—" ver_cell="—" fix_cell="—"
+            [ -n "$PKG" ] && pkg_cell="\`${PKG}\`"
+            [ -n "$VER" ] && ver_cell="\`${VER}\`"
+            [ -n "$FIX" ] && fix_cell="\`${FIX}\`"
+            if [ "$with_fix" = "1" ]; then
+              COMMENT+="| ${CVE_CELL} | ${pkg_cell} | ${ver_cell} | ${fix_cell} |"$'\n'
+            else
+              COMMENT+="| ${CVE_CELL} | ${pkg_cell} | ${ver_cell} |"$'\n'
+            fi
+          done <<< "$rows"
+          if [ "$total" -gt "$MAX_ROWS" ]; then
+            COMMENT+="_…and $((total - MAX_ROWS)) more._"$'\n'
+          fi
+          COMMENT+=$'</details>\n\n'
+        }
+
+        # Introduced findings for one severity.
+        emit_introduced_sev() {
+          local intro_json="$1" sev="$2" emoji="$3" label="$4" n sfx
+          n=$(echo "$intro_json" | jq --arg s "$sev" '[.[] | select((.severity // "" | ascii_upcase)==$s)] | length')
+          [ "$n" -eq 0 ] && return 0
+          sfx="s"; if [ "$n" -eq 1 ]; then sfx=""; fi
+          emit_table "$(echo "$intro_json" | jq -c --arg s "$sev" '[.[] | select((.severity // "" | ascii_upcase)==$s)]')" \
+                     "${emoji} <strong>${label}</strong> · ${n} finding${sfx}" "1"
+        }
+
         while IFS= read -r scan; do
           ARCH=$(echo "$scan" | jq -r '.arch? // ""')
-            [ -z "$ARCH" ] && ARCH="arch not specified"
-          STATUS=$(echo "$scan" | jq -r '.scanStatus // "unknown"')
+          STATUS=$(echo "$scan" | jq -r '.scanStatus // ""')
+          INTRO=$(echo "$scan" | jq -c '.introducedCves // []')
+          RESOLVED=$(echo "$scan" | jq -c '.resolvedCves // []')
+          PRESENT=$(echo "$scan" | jq -c '(.introducedCves // []) + (.noChangeCves // [])')
+          # Empty when the base branch has never been scanned (first-seen image):
+          # the scanner has no baseline, so every present CVE is tagged "introduced".
+          COMPARE_TO=$(echo "$scan" | jq -r '.compareTo // ""')
 
-          T=$(echo "$scan" | jq '.introducedCves // [] | length')
-          N=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="introduced")] | length')
-          O=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.status=="no_change")] | length')
-          H=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.severity=="HIGH")] | length')
-          C=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(.severity=="CRITICAL")] | length')
-          OTHER=$(echo "$scan" | jq '[.introducedCves // [] | .[] | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))] | length')
+          N=$(echo "$INTRO" | jq 'length')
+          R=$(echo "$RESOLVED" | jq 'length')
+          T=$(echo "$PRESENT" | jq 'length')
+          TOTAL_NEW=$((TOTAL_NEW + N))
+          TOTAL_RESOLVED=$((TOTAL_RESOLVED + R))
+          cC=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="CRITICAL")] | length')
+          cH=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="HIGH")] | length')
+          cM=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="MEDIUM")] | length')
+          cL=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase)=="LOW")] | length')
+          cU=$(echo "$PRESENT" | jq '[.[] | select((.severity // "" | ascii_upcase) as $s | ($s!="CRITICAL" and $s!="HIGH" and $s!="MEDIUM" and $s!="LOW"))] | length')
 
-          if [ "$T" -eq 0 ]; then
-            CLEAN_ARCHES+="- \`$ARCH\` (status: \`$STATUS\`)"$'\n'
-            continue
+          # Per-arch header + status.
+          if [ -n "$ARCH" ]; then
+            COMMENT+="## $ARCH"$'\n'
           fi
-
-          # Header for this arch
-          COMMENT+="## $ARCH"$'\n'
-          COMMENT+="- **Status:** \`$STATUS\`"$'\n'
-          COMMENT+="- **Total CVEs:** \`$T\` (\`$N\` new, \`$O\` existing)"$'\n'
-          COMMENT+="- **Critical:** \`$C\`, **High:** \`$H\`"$'\n\n'
-
-          build_table() {
-            local sev="$1" heading="$2" rows
-            if [ "$sev" = "OTHER" ]; then
-              # Everything not CRITICAL/HIGH (MEDIUM/LOW/UNKNOWN)
-              rows=$(echo "$scan" | jq -r '
-                [.introducedCves // [] | .[]
-                  | select(((.severity // "" | ascii_upcase)!="CRITICAL") and ((.severity // "" | ascii_upcase)!="HIGH"))][]
-                | [
-                    (.cveId // .cveName // "<unknown>"),
-                    ((.cveDescription // "")
-                      | gsub("\\|"; "\\\\|")
-                      | gsub("`"; "\\\\`")
-                      | gsub("<"; "&lt;")
-                      | gsub(">"; "&gt;")
-                      | gsub("\r?\n"; " ")
-                      | .[0:400]),
-                    ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
-                  ]
-                | @tsv
-              ')
-            else
-              rows=$(echo "$scan" | jq -r --arg sev "$sev" '
-                [.introducedCves // [] | .[] | select((.severity // "" | ascii_upcase)==$sev)][]
-                | [
-                    (.cveId // .cveName // "<unknown>"),
-                    ((.cveDescription // "")
-                      | gsub("\\|"; "\\\\|")
-                      | gsub("`"; "\\\\`")
-                      | gsub("<"; "&lt;")
-                      | gsub(">"; "&gt;")
-                      | gsub("\r?\n"; " ")
-                      | .[0:400]),
-                    ((.packageName // "<pkg>") + " " + (.packageVersion // ""))
-                  ]
-                | @tsv
-              ')
-            fi
-            [ -z "$rows" ] && return 0
-            
-            COMMENT+=$'| CVE | Description | Package |\n'
-            COMMENT+=$'|---|---|---|\n'
-            while IFS=$'\t' read -r CVE DESC PKG; do
-              [ -z "${CVE}" ] && CVE="<unknown>"
-              [ -z "${PKG}" ] && PKG="<pkg>"
-              COMMENT+="| ${CVE} | ${DESC} | ${PKG} |"$'\n'
-            done <<< "$rows"
+          if [ -n "$STATUS" ]; then
+            COMMENT+="- **Status:** \`$STATUS\`"$'\n'
+          fi
+          if [ -n "$ARCH" ] || [ -n "$STATUS" ]; then
             COMMENT+=$'\n'
-          }
-
-          # CRITICAL table (visible if any)
-          if [ "$C" -gt 0 ]; then
-            COMMENT+=$'### Critical severity\n\n'
-            build_table "CRITICAL" "Critical severity"
           fi
 
-          # HIGH table (visible if any)
-          if [ "$H" -gt 0 ]; then
-            COMMENT+=$'### High severity\n\n'
-            build_table "HIGH" "High severity"
+          # Summary line (counts only). With no baseline yet, introduced/resolved
+          # aren't meaningful (everything is tagged introduced) — report the full
+          # inventory instead of a misleading "N newly introduced vs main".
+          if [ -n "$MAIN_BRANCH" ] && [ -z "$COMPARE_TO" ]; then
+            tvword="vulnerabilities"; if [ "$T" -eq 1 ]; then tvword="vulnerability"; fi
+            COMMENT+="**${T}** total ${tvword} · no baseline scan for ${BASE_LABEL} yet — showing full inventory (introduced/resolved vs ${BASE_LABEL} will appear once it has been scanned)"$'\n'
+          else
+            ivword="vulnerabilities"; if [ "$N" -eq 1 ]; then ivword="vulnerability"; fi
+            COMMENT+="**${N}** newly introduced ${ivword} · **${R}** resolved · **${T}** total in this PR vs ${BASE_LABEL}"$'\n'
           fi
 
-          # OTHER severities in a collapsed details section
-          if [ "$OTHER" -gt 0 ]; then
-            COMMENT+=$'<details><summary><strong>Other severities</strong> (Medium/Low/Unknown) — '
-            COMMENT+="\`$OTHER\` CVEs"
-            COMMENT+=$'</summary>'$'\n\n'
-            build_table "OTHER" "Other severities"
-            COMMENT+=$'</details>'$'\n\n'
+          # Severity breakdown of total present.
+          BREAK=""
+          [ "$cC" -gt 0 ] && BREAK+="🔴 ${cC} Critical | "
+          [ "$cH" -gt 0 ] && BREAK+="🔶 ${cH} High | "
+          [ "$cM" -gt 0 ] && BREAK+="🟡 ${cM} Medium | "
+          [ "$cL" -gt 0 ] && BREAK+="🟢 ${cL} Low | "
+          [ "$cU" -gt 0 ] && BREAK+="⚪ ${cU} Other | "
+          BREAK="${BREAK% | }"
+          if [ -n "$BREAK" ]; then COMMENT+="$BREAK"$'\n'; fi
+          COMMENT+=$'\n'
+
+          # Detail tables: introduced (by severity) + resolved only;
+          # already-present CVEs are counted above, not listed.
+          emit_introduced_sev "$INTRO" "CRITICAL" "🔴" "Critical"
+          emit_introduced_sev "$INTRO" "HIGH"     "🔶" "High"
+          emit_introduced_sev "$INTRO" "MEDIUM"   "🟡" "Medium"
+          emit_introduced_sev "$INTRO" "LOW"      "🟢" "Low"
+          # Catch-all for introduced findings outside C/H/M/L (UNKNOWN etc),
+          # else they'd be counted in N but listed nowhere (as SCA/IaC do).
+          OTHER_FILTER='[.[] | select((.severity // "" | ascii_upcase) as $s | ($s!="CRITICAL" and $s!="HIGH" and $s!="MEDIUM" and $s!="LOW"))]'
+          nO=$(echo "$INTRO" | jq "$OTHER_FILTER | length")
+          if [ "$nO" -gt 0 ]; then
+            osfx="s"; if [ "$nO" -eq 1 ]; then osfx=""; fi
+            emit_table "$(echo "$INTRO" | jq -c "$OTHER_FILTER")" \
+                       "⚪ <strong>Other</strong> · ${nO} finding${osfx}" "1"
+          fi
+          if [ "$R" -gt 0 ]; then
+            rsfx="s"; if [ "$R" -eq 1 ]; then rsfx=""; fi
+            emit_table "$RESOLVED" "✅ <strong>Resolved</strong> · ${R} finding${rsfx}" "0"
           fi
         done < <(jq -c '.[]' "$ARRAY")
 
-        # Collapsed list of totally clean arches (if any)
-        if [ -n "$CLEAN_ARCHES" ]; then
-          COMMENT+=$'<details><summary><strong>More architectures</strong> — all clear ✅</summary>'$'\n\n'
-          COMMENT+="$CLEAN_ARCHES"$'\n'
-          COMMENT+=$'</details>'$'\n'
+        # Footer: Upwind Console link + scan time.
+        if [ -n "$FINGERPRINT" ]; then
+          COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/code?mainPageTab=Reviews&secondaryTab=SCA&sidePanel=scan-at-build&sidePanelItemId=${FINGERPRINT})"$'\n\n'
+        fi
+        if [ -n "${SCAN_DURATION_HUMAN:-}" ]; then
+          COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
         fi
 
-        echo "Posting summary comment on PR"
+        # --- Sticky comment + scan history ---
+        # Find our prior comment (by marker), recover its history, edit in place.
+        AUTH_HDR="Authorization: bearer $GH_TOKEN"
+        API="https://api.github.com/repos/$REPO"
 
-        COMMENT_JSON=$(jq -n --arg body "$COMMENT" '{ body: $body }')
-        curl -L \
-          -X POST \
-          -H "Authorization: bearer $GH_TOKEN" \
-          -H "Content-Type: application/json" \
-          -H "X-GitHub-Api-Version: 2022-11-28" \
-          -d "$COMMENT_JSON" \
-          "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+        EXISTING_ID=""
+        PRIOR_HISTORY="[]"
+        page=1
+        while [ "$page" -le 10 ]; do
+          PAGE_JSON=$(curl -fsSL \
+            -H "$AUTH_HDR" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$API/issues/$PR_NUMBER/comments?per_page=100&page=$page" 2>/dev/null || echo "[]")
+          [ "$(echo "$PAGE_JSON" | jq 'length')" -eq 0 ] && break
+
+          MATCH=$(echo "$PAGE_JSON" | jq -c --arg m "$COMMENT_MARKER" \
+            'map(select(.body | contains($m))) | .[0] // empty')
+          if [ -n "$MATCH" ]; then
+            EXISTING_ID=$(echo "$MATCH" | jq -r '.id')
+            # Recover the hidden base64 history blob.
+            PRIOR_B64=$(echo "$MATCH" | jq -r '.body' \
+              | sed -n "s/.*${HISTORY_PREFIX}\([A-Za-z0-9+/=]*\) -->.*/\1/p" | head -n1)
+            if [ -n "$PRIOR_B64" ]; then
+              DECODED=$(printf '%s' "$PRIOR_B64" | base64 -d 2>/dev/null || echo "")
+              if echo "$DECODED" | jq -e 'type=="array"' >/dev/null 2>&1; then
+                PRIOR_HISTORY="$DECODED"
+              fi
+            fi
+            break
+          fi
+          page=$((page + 1))
+        done
+
+        # Append this run as the newest entry (keep last N).
+        HISTORY_JSON=$(echo "$PRIOR_HISTORY" | jq -c \
+          --arg sha "$COMMIT_SHA" \
+          --arg url "$COMMIT_URL" \
+          --arg ts "$SCANNED_AT" \
+          --argjson new "$TOTAL_NEW" \
+          --argjson resolved "$TOTAL_RESOLVED" \
+          --argjson max "$HISTORY_MAX_ENTRIES" \
+          '. + [{sha: $sha, url: $url, ts: $ts, new: $new, resolved: $resolved}] | .[-$max:]')
+
+        # Render the visible "Scan history" section.
+        HISTORY_MD=$(echo "$HISTORY_JSON" | jq -r '
+          (length) as $n |
+          (if $n == 1 then "scan" else "scans" end) as $noun |
+          "---\n\n<details>\n<summary>Scan history (\($n) \($noun))</summary>\n\n"
+          + "| Commit | Scanned at | New | Resolved | Net |\n"
+          + "|--------|------------|-----|----------|-----|\n"
+          + ([ to_entries[]
+               | .key as $i | .value as $e
+               | (if $i == ($n - 1) then " <" else "" end) as $latest
+               | (if $e.new > 0 then "+\($e.new)" else "0" end) as $newc
+               | (if $e.resolved > 0 then "-\($e.resolved)" else "0" end) as $resc
+               | ($e.new - $e.resolved) as $net
+               | (if $net > 0 then "+\($net)" else "\($net)" end) as $netc
+               | "| [`\($e.sha[0:7])`](\($e.url))\($latest) | \($e.ts) | \($newc) | \($resc) | \($netc) |"
+             ] | join("\n"))
+          + "\n\n</details>\n\n"
+          + (.[-1] | "_Last scanned: [`\(.sha[0:7])`](\(.url)) · \(.ts)_\n")
+        ')
+
+        COMMENT+="$HISTORY_MD"
+
+        # Hidden state blob: source of truth for the next run.
+        HISTORY_B64=$(printf '%s' "$HISTORY_JSON" | base64 | tr -d '\n')
+        HIDDEN_STATE=$'\n'"${HISTORY_PREFIX}${HISTORY_B64} -->"$'\n'
+
+        # Cap at GitHub's 65536-char limit: truncate the visible body only,
+        # keeping the hidden state intact (the next run reads it).
+        CAP=$((65000 - ${#HIDDEN_STATE}))
+        if [ "${#COMMENT}" -gt "$CAP" ]; then
+          COMMENT="${COMMENT:0:$((CAP - 500))}"
+          COMMENT="${COMMENT%$'\n'*}"
+          OPEN_TAGS=$(grep -c '<details>' <<< "$COMMENT" || true)
+          CLOSE_TAGS=$(grep -c '</details>' <<< "$COMMENT" || true)
+          while [ "$OPEN_TAGS" -gt "$CLOSE_TAGS" ]; do
+            COMMENT+=$'\n</details>'
+            CLOSE_TAGS=$((CLOSE_TAGS + 1))
+          done
+          COMMENT+=$'\n\n_Comment truncated to fit GitHub\'s size limit — see the Upwind Console._'
+        fi
+        COMMENT+="$HIDDEN_STATE"
+
+        # Send the body via a file, never as a shell argument.
+        PAYLOAD_FILE="$(mktemp)"
+        printf '%s' "$COMMENT" | jq -Rs '{ body: . }' > "$PAYLOAD_FILE"
+        if [ -n "$EXISTING_ID" ]; then
+          echo "Updating existing PR comment ($EXISTING_ID) with new scan + history"
+          curl -L \
+            -X PATCH \
+            -H "$AUTH_HDR" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data @"$PAYLOAD_FILE" \
+            "$API/issues/comments/$EXISTING_ID"
+        else
+          echo "Posting new summary comment on PR"
+          curl -L \
+            -X POST \
+            -H "$AUTH_HDR" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data @"$PAYLOAD_FILE" \
+            "$API/issues/$PR_NUMBER/comments"
+        fi
+        rm -f "$PAYLOAD_FILE"

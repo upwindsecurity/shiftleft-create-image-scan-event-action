@@ -35,6 +35,9 @@ Define the following inputs in your workflow to configure the action:
 | `github_token`                         | No       | –               | GitHub token used to authenticate when posting the PR comment. Required when `add_comment` is `true`.                               |
 | `pr_number`                            | No       | –               | Pull request number to comment on. Required when `add_comment` is `true`.                                                           |
 | `repo_name`                            | No       | –               | The GitHub repository in `owner/repo` format. Required when `add_comment` is `true`.                                                |
+| `main_branch`                          | No       | –               | Base/target branch to diff against (typically `github.event.pull_request.base.ref`). When set, introduced/resolved CVEs are computed against the latest scanned image of this branch instead of the previous scan. Requires that branch to have been scanned. |
+| `pr_id`                                | No       | –               | Pull request identifier to associate with the scan.                                                                                 |
+| `pr_link`                              | No       | –               | Pull request URL to associate with the scan.                                                                                        |
 
 Sensitive values such as `upwind_client_id`, `upwind_client_secret`, and `docker_password` should be stored securely using GitHub Secrets.
 
@@ -73,6 +76,29 @@ Set `add_comment: true` to have the action post a Markdown summary of the scan (
 ```
 
 The job needs `pull-requests: write` permission for the token to post the comment.
+
+### Diffing against the base branch
+
+By default the comment compares the scan against the image's previous scan. Set `main_branch` to the pull request's base branch to instead compute introduced/resolved CVEs relative to the latest scanned image of that branch. Pass `pr_id` and `pr_link` to associate the scan with the originating pull request. These values are typically sourced from the `github.event.pull_request.*` context:
+
+```yaml
+- name: Upwind Security ShiftLeft Scanning
+  uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
+  with:
+    upwind_client_id: ${{ secrets.UPWIND_CLIENT_ID }}
+    upwind_client_secret: ${{ secrets.UPWIND_CLIENT_SECRET }}
+    docker_image: 'your-docker-image:tag'
+    pull_image: false
+    add_comment: true
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    pr_number: ${{ github.event.pull_request.number }}
+    repo_name: ${{ github.repository }}
+    main_branch: ${{ github.event.pull_request.base.ref }}
+    pr_id: ${{ github.event.pull_request.number }}
+    pr_link: ${{ github.event.pull_request.html_url }}
+```
+
+The base branch must already have been scanned for the diff to be meaningful; otherwise all CVEs will appear as newly introduced.
 
 ## Versioning
 It is recommended that you track the `main` branch rather than a specified tag. This will ensure that you always have the most up to date version of the action.
