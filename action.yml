@@ -32,6 +32,10 @@ inputs:
     description: File location to write JSON output to
     default: "output.json"
     type: string
+  result_wait_seconds:
+    description: How long (in seconds) the CLI waits for scan results before giving up. When results aren't ready in time the PR comment is skipped.
+    default: "300"
+    type: string
   commit_sha:
     description: SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable
     default: ${GITHUB_SHA}
@@ -209,6 +213,7 @@ runs:
           --oci-client=${{ inputs.oci_client }} \
           --block-on="${{ inputs.block_on}}" \
           --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}} \
+          --result-wait-seconds=${{ inputs.result_wait_seconds }} \
           "${EXTRA_ARGS[@]}"
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "Error: $OUTPUT_JSON not found"

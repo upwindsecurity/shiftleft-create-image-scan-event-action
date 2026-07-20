@@ -38,6 +38,7 @@ Define the following inputs in your workflow to configure the action:
 | `main_branch`                          | No       | –               | Base/target branch to diff against (typically `github.event.pull_request.base.ref`). When set, introduced/resolved CVEs are computed against the latest scanned image of this branch instead of the previous scan. Requires that branch to have been scanned. |
 | `pr_id`                                | No       | –               | Pull request identifier to associate with the scan.                                                                                 |
 | `pr_link`                              | No       | –               | Pull request URL to associate with the scan.                                                                                        |
+| `result_wait_seconds`                  | No       | `300`           | Seconds the CLI waits for scan results before giving up (results not ready ⇒ the PR comment is skipped).                            |
 
 Sensitive values such as `upwind_client_id`, `upwind_client_secret`, and `docker_password` should be stored securely using GitHub Secrets.
 
