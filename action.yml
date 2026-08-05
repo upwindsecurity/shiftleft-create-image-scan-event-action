@@ -84,7 +84,7 @@ inputs:
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
   block_merge:
-    description: When 'true', run the 'Enforce Upwind block policy' step and fail the workflow (block the merge) if the scan violates the Upwind PR-block policy (server-decided when available; otherwise more than 1 introduced critical vulnerability).
+    description: When 'true', run the 'Enforce Upwind block policy' step and fail the workflow (block the merge) if the scan violates the Upwind PR-block policy (server-decided when available; otherwise at least 1 introduced critical vulnerability).
     required: false
     default: "false"
 
@@ -564,11 +564,11 @@ runs:
           exit 0
         fi
 
-        # Fallback for CLIs that don't yet emit a server verdict: > 1 introduced critical.
+        # Fallback for CLIs that don't yet emit a server verdict: at least 1 introduced critical.
         CRIT=$(jq "[ $NORM | (.introducedCves // [])[] | select((.severity // \"\" | ascii_upcase) == \"CRITICAL\") ] | length" "$OUTPUT_JSON")
         echo "Introduced CRITICAL vulnerabilities: ${CRIT:-0}"
-        if [ "${CRIT:-0}" -gt 1 ]; then
-          echo "::error::Blocked by Upwind — ${CRIT} introduced critical vulnerabilities (policy: more than 1)"
+        if [ "${CRIT:-0}" -ge 1 ]; then
+          echo "::error::Blocked by Upwind — ${CRIT} introduced critical vulnerabilities (policy: at least 1)"
           exit 1
         fi
-        echo "Upwind block policy passed (introduced critical <= 1)."
+        echo "Upwind block policy passed (no introduced critical vulnerabilities)."
