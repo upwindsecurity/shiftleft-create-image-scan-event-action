@@ -84,7 +84,7 @@ inputs:
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
   block_merge:
-    description: When 'true', run the 'Enforce Upwind block policy' step and fail the workflow (block the merge) if the scan violates the Upwind PR-block policy (server-decided when available; otherwise at least 1 introduced critical vulnerability).
+    description: When 'true', run the 'Enforce Upwind block policy' step and fail the workflow (block the merge) when the Upwind backend decides the scan violates the PR-block policy (server-decided verdict; the threshold and severities are owned by the backend).
     required: false
     default: "false"
 
@@ -544,6 +544,10 @@ runs:
       if: ${{ inputs.block_merge == 'true' }}
       shell: bash
       run: |
+        # The block policy (how many vulnerabilities of which severities warrant a
+        # block) is owned entirely by the Upwind backend. This step only obeys the
+        # server-decided verdict `shouldBlockPr` in the scan output — it never
+        # recomputes a threshold here.
         OUTPUT_JSON="${{ inputs.output_json }}"
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "::warning::block_merge enabled but $OUTPUT_JSON not found; skipping block policy"
@@ -554,21 +558,16 @@ runs:
         NORM='(if type=="array" then .[] else . end)'
 
         HAS_VERDICT=$(jq "[ $NORM | .shouldBlockPr | select(. != null) ] | length" "$OUTPUT_JSON" 2>/dev/null || echo 0)
-        if [ "${HAS_VERDICT:-0}" -gt 0 ]; then
-          SERVER_BLOCK=$(jq "[ $NORM | .shouldBlockPr ] | any(. == true)" "$OUTPUT_JSON")
-          if [ "$SERVER_BLOCK" = "true" ]; then
-            echo "::error::Blocked by Upwind — scan violates the PR-block policy"
-            exit 1
-          fi
-          echo "Upwind block policy passed (server verdict)."
+        if [ "${HAS_VERDICT:-0}" -eq 0 ]; then
+          # No verdict means the backend/CLI predates shouldBlockPr. Don't guess a
+          # policy client-side — warn and let the merge through (fail-open).
+          echo "::warning::block_merge enabled but the scan output carries no shouldBlockPr verdict (backend/CLI may be out of date); not blocking"
           exit 0
         fi
 
-        # Fallback for CLIs that don't yet emit a server verdict: at least 1 introduced critical.
-        CRIT=$(jq "[ $NORM | (.introducedCves // [])[] | select((.severity // \"\" | ascii_upcase) == \"CRITICAL\") ] | length" "$OUTPUT_JSON")
-        echo "Introduced CRITICAL vulnerabilities: ${CRIT:-0}"
-        if [ "${CRIT:-0}" -ge 1 ]; then
-          echo "::error::Blocked by Upwind — ${CRIT} introduced critical vulnerabilities (policy: at least 1)"
+        SERVER_BLOCK=$(jq "[ $NORM | .shouldBlockPr ] | any(. == true)" "$OUTPUT_JSON")
+        if [ "$SERVER_BLOCK" = "true" ]; then
+          echo "::error::Blocked by Upwind — scan violates the PR-block policy"
           exit 1
         fi
-        echo "Upwind block policy passed (no introduced critical vulnerabilities)."
+        echo "Upwind block policy passed (server verdict)."
