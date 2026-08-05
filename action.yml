@@ -83,6 +83,10 @@ inputs:
     required: false
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
+  block_merge:
+    description: When 'true', fail the workflow (block the merge) if the scan result violates the Upwind PR-block policy (server-decided; currently at least one introduced vulnerability).
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -208,6 +212,7 @@ runs:
           --output-json=$OUTPUT_JSON \
           --oci-client=${{ inputs.oci_client }} \
           --block-on="${{ inputs.block_on}}" \
+          --block-merge=${{ inputs.block_merge }} \
           --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}} \
           "${EXTRA_ARGS[@]}"
         if [ ! -f "$OUTPUT_JSON" ]; then
