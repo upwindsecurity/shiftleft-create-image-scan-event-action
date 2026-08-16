@@ -83,7 +83,7 @@ inputs:
     required: false
   block_on:
     description: Block workflow based on Upwind Scan Recommendation. Can be either 'do_not_deploy' or 'deploy_with_caution'
-  block_merge:
+  enforce_block_policy:
     description: When 'true', run the 'Enforce Upwind block policy' step and fail the workflow (block the merge) when the Upwind backend decides the scan violates the PR-block policy (server-decided verdict; the threshold and severities are owned by the backend).
     required: false
     default: "false"
@@ -541,7 +541,7 @@ runs:
         rm -f "$PAYLOAD_FILE"
 
     - name: Enforce Upwind block policy
-      if: ${{ inputs.block_merge == 'true' }}
+      if: ${{ inputs.enforce_block_policy == 'true' }}
       shell: bash
       run: |
         # The block policy (how many vulnerabilities of which severities warrant a
@@ -550,7 +550,7 @@ runs:
         # recomputes a threshold here.
         OUTPUT_JSON="${{ inputs.output_json }}"
         if [ ! -f "$OUTPUT_JSON" ]; then
-          echo "::warning::block_merge enabled but $OUTPUT_JSON not found; skipping block policy"
+          echo "::warning::enforce_block_policy enabled but $OUTPUT_JSON not found; skipping block policy"
           exit 0
         fi
 
@@ -561,7 +561,7 @@ runs:
         if [ "${HAS_VERDICT:-0}" -eq 0 ]; then
           # No verdict means the backend/CLI predates shouldBlockPr. Don't guess a
           # policy client-side — warn and let the merge through (fail-open).
-          echo "::warning::block_merge enabled but the scan output carries no shouldBlockPr verdict (backend/CLI may be out of date); not blocking"
+          echo "::warning::enforce_block_policy enabled but the scan output carries no shouldBlockPr verdict (backend/CLI may be out of date); not blocking"
           exit 0
         fi
 
