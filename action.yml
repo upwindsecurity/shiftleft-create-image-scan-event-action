@@ -119,21 +119,6 @@ runs:
 
       shell: bash
       run: |
-        response=$(curl -sSL -X POST \
-        --url "https://oauth.${{ inputs.upwind_uri }}/oauth/token" \
-        --data "audience=https://agent.${{ inputs.upwind_uri }}" \
-        --data "client_id=${{ inputs.upwind_client_id }}" \
-        --data "client_secret=${{ inputs.upwind_client_secret }}" \
-        --data "grant_type=client_credentials")
-
-        if ! TOKEN=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null); then
-          echo "Failed to parse JSON response: $response" >&2
-          exit 1
-        elif [ -z "$TOKEN" ]; then
-          echo "No access_token found in response: $response" >&2
-          exit 1
-        fi
-
         OS=$(uname | tr '[:upper:]' '[:lower:]')
         ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 
