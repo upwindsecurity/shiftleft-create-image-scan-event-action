@@ -374,7 +374,13 @@ runs:
             COMMENT+="## $ARCH"$'\n'
           fi
           if [ -n "$STATUS" ]; then
-            COMMENT+="- **Status:** \`$STATUS\`"$'\n'
+            case "$STATUS" in
+              proceed_with_deployment) STATUS_LABEL="✅ Passed" ;;
+              deploy_with_caution)     STATUS_LABEL="⚠️ Warn" ;;
+              do_not_deploy)           STATUS_LABEL="⛔ Blocked" ;;
+              *)                       STATUS_LABEL="$STATUS" ;;
+            esac
+            COMMENT+="- **Status:** $STATUS_LABEL"$'\n'
           fi
           if [ -n "$ARCH" ] || [ -n "$STATUS" ]; then
             COMMENT+=$'\n'
