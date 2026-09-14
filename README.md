@@ -27,6 +27,8 @@ Define the following inputs in your workflow to configure the action:
 | `additional_registries`                | No       | –               | Comma-separated list of additional registries to associate with the scanned image.                                                  |
 | `output_json`                          | No       | `output.json`   | File location to write the JSON scan results to.                                                                                    |
 | `commit_sha`                           | No       | `${GITHUB_SHA}` | SHA to associate with the build. Defaults to the `GITHUB_SHA` environment variable.                                                 |
+| `repository`                           | No       | current repo    | Repository to attribute the scan to, as a clone URL (`https://github.com/owner/repo`). Defaults to the repository running the workflow. Set this when the scan runs somewhere other than the repository that built the image. |
+| `branch`                               | No       | `${GITHUB_REF}` | Branch to attribute the scan to. Defaults to the ref running the workflow. Set alongside `repository` when scanning on behalf of another repository. |
 | `upwind_uri`                           | No       | `upwind.io`     | Public Upwind URI domain name.                                                                                                      |
 | `use_sudo`                             | No       | `true`          | Whether to invoke the scan with `sudo` so it can connect to the OCI client.                                                         |
 | `perform_multiarchitecture_image_scan` | No       | `true`          | Whether to perform a multi-architecture image scan.                                                                                 |
@@ -100,6 +102,33 @@ By default the comment compares the scan against the image's previous scan. Set 
 ```
 
 The base branch must already have been scanned for the diff to be meaningful; otherwise all CVEs will appear as newly introduced.
+
+## Scanning On Behalf Of Another Repository
+
+By default the scan is attributed to the repository running the workflow, via
+`GITHUB_REPOSITORY`. When the image is built in one repository but scanned in
+another - a central scanning repository, or a workflow dispatched from
+elsewhere - that default attributes every scan to the scanning repository, and
+the source repository is lost.
+
+Pass `repository` (and optionally `branch`) to attribute the scan to the
+repository that actually built the image:
+
+```yaml
+- name: Upwind Security ShiftLeft Scan
+  uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
+  with:
+    upwind_client_id: ${{ secrets.UPWIND_CLIENT_ID }}
+    upwind_client_secret: ${{ secrets.UPWIND_CLIENT_SECRET }}
+    docker_image: ${{ inputs.image_name }}
+    pull_image: false
+    repository: ${{ github.server_url }}/${{ github.repository_owner }}/${{ inputs.repo }}
+```
+
+The value must be the repository's clone URL, matching the form Upwind stores
+for onboarded repositories (`https://github.com/owner/repo`). A URL that matches
+an onboarded repository is resolved to that repository, so the scan appears
+alongside its source scans; a URL with no match is recorded as-is.
 
 ## Versioning
 It is recommended that you track the `main` branch rather than a specified tag. This will ensure that you always have the most up to date version of the action.
