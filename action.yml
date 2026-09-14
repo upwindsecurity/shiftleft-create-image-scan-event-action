@@ -36,6 +36,19 @@ inputs:
     description: SHA to be associated with the build. By default this uses the $GITHUB_SHA environmental variable
     default: ${GITHUB_SHA}
     required: false
+  repository:
+    description: >-
+      Repository to attribute the scan to, as a clone URL
+      (https://github.com/owner/repo). Defaults to the repository running the
+      workflow. Set this when the scan runs somewhere other than the repository
+      that built the image, so the result is attributed to the source repository
+      rather than to the repository hosting the scan workflow.
+    required: false
+  branch:
+    description: >-
+      Branch to attribute the scan to. Defaults to the ref running the workflow.
+      Set alongside `repository` when scanning on behalf of another repository.
+    required: false
   upwind_uri:
     description: Public Upwind URI domain name
     default: upwind.io
@@ -176,6 +189,14 @@ runs:
         if [[ -n "${{ inputs.commit_sha }}" ]]; then
           COMMIT_SHA=${{ inputs.commit_sha }}
         fi
+        REPOSITORY="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+        if [[ -n "${{ inputs.repository }}" ]]; then
+          REPOSITORY="${{ inputs.repository }}"
+        fi
+        BRANCH="${GITHUB_REF}"
+        if [[ -n "${{ inputs.branch }}" ]]; then
+          BRANCH="${{ inputs.branch }}"
+        fi
         SUDO=""
         if [ "${{ inputs.use_sudo }}" = "true" ]; then
           SUDO=sudo
@@ -202,8 +223,8 @@ runs:
           --upwind-client-secret=${{ inputs.upwind_client_secret }} \
           --docker-image ${{ inputs.docker_image }} \
           --commit-sha ${COMMIT_SHA} \
-          --branch ${GITHUB_REF} \
-          --repository ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} \
+          --branch "${BRANCH}" \
+          --repository "${REPOSITORY}" \
           --docker-user="${{ inputs.docker_user }}" \
           --docker-password="${{ inputs.docker_password }}" \
           --debug=${{ inputs.debug }}  \
