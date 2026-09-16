@@ -215,20 +215,14 @@ runs:
           EXTRA_ARGS+=(--pr-link="$PR_LINK")
         fi
 
-        # CI pipeline context from GitHub Actions' predefined variables. The
-        # pipeline flags are newer than some released shiftleft binaries, so they
-        # are feature-detected from --help: an older binary that predates them is
-        # not passed an unknown flag (which it rejects with a non-zero exit).
-        SL_HELP="$($SUDO ./shiftleft image --help 2>&1 || true)"
-        sl_supports() { printf '%s' "$SL_HELP" | grep -q -- "$1"; }
-
-        if sl_supports --pipeline-name && [ -n "$GITHUB_WORKFLOW" ]; then
+        # CI pipeline context from GitHub Actions' predefined variables.
+        if [ -n "$GITHUB_WORKFLOW" ]; then
           EXTRA_ARGS+=(--pipeline-name="$GITHUB_WORKFLOW")
         fi
-        if sl_supports --job-name && [ -n "$GITHUB_JOB" ]; then
+        if [ -n "$GITHUB_JOB" ]; then
           EXTRA_ARGS+=(--job-name="$GITHUB_JOB")
         fi
-        if sl_supports --pipeline-run-id && [ -n "$GITHUB_RUN_ID" ]; then
+        if [ -n "$GITHUB_RUN_ID" ]; then
           EXTRA_ARGS+=(--pipeline-run-id="$GITHUB_RUN_ID")
           EXTRA_ARGS+=(--pipeline-run-link="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
         fi
