@@ -458,7 +458,7 @@ runs:
 
         # Footer: Upwind Console link + scan time.
         if [ -n "$FINGERPRINT" ]; then
-          COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/code?mainPageTab=Reviews&secondaryTab=SCA&sidePanel=scan-at-build&sidePanelItemId=${FINGERPRINT})"$'\n\n'
+          COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/?redirectToCodeScanId=${FINGERPRINT})"$'\n\n'
         fi
         if [ -n "${SCAN_DURATION_HUMAN:-}" ]; then
           COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
