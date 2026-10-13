@@ -41,6 +41,7 @@ Define the following inputs in your workflow to configure the action:
 | `main_branch`                          | No       | –               | Base/target branch to diff against (typically `github.event.pull_request.base.ref`). When set, introduced/resolved CVEs are computed against the latest scanned image of this branch instead of the previous scan. Requires that branch to have been scanned. |
 | `pr_id`                                | No       | –               | Pull request identifier to associate with the scan.                                                                                 |
 | `pr_link`                              | No       | –               | Pull request URL to associate with the scan.                                                                                        |
+| `fail_on_scan_error`                   | No       | `false`         | Fail the step when the scan could not be completed at all (image could not be unpacked, build event rejected, SBOM upload failed, results unfetchable). By default the error is reported and the workflow continues. |
 
 Sensitive values such as `upwind_client_id`, `upwind_client_secret`, and `docker_password` should be stored securely using GitHub Secrets.
 
@@ -129,6 +130,30 @@ The value must be the repository's clone URL, matching the form Upwind stores
 for onboarded repositories (`https://github.com/owner/repo`). A URL that matches
 an onboarded repository is resolved to that repository, so the scan appears
 alongside its source scans; a URL with no match is recorded as-is.
+
+## Failing On Scan Errors
+
+By default the action reports a scan that could not run and lets the workflow
+continue, so an infrastructure problem does not block a merge. When the scan
+produces no result the step prints a GitHub error annotation instead of
+"Image scan completed".
+
+Set `fail_on_scan_error: true` to fail the step instead, for example when the
+image could not be unpacked by the scanner:
+
+```yaml
+- name: Upwind Security ShiftLeft Scan
+  uses: upwindsecurity/shiftleft-create-image-scan-event-action@main
+  with:
+    upwind_client_id: ${{ secrets.UPWIND_CLIENT_ID }}
+    upwind_client_secret: ${{ secrets.UPWIND_CLIENT_SECRET }}
+    docker_image: 'your-docker-image:tag'
+    pull_image: false
+    fail_on_scan_error: true
+```
+
+This is independent of `enforce_block_policy`, which fails the step on the
+scan's findings rather than on the scan not running.
 
 ## Versioning
 It is recommended that you track the `main` branch rather than a specified tag. This will ensure that you always have the most up to date version of the action.

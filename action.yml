@@ -100,6 +100,16 @@ inputs:
     description: When 'true', run the 'Enforce Upwind block policy' step and fail the workflow (block the merge) when the Upwind backend decides the scan violates the PR-block policy (server-decided verdict; the threshold and severities are owned by the backend).
     required: false
     default: "false"
+  fail_on_scan_error:
+    description: >-
+      When 'true', fail the step when the scan could not be completed at all
+      (image could not be unpacked, build event rejected, SBOM upload failed,
+      results unfetchable). Passes --fail-on-scan-error to the CLI and fails
+      when the output file carries no result. Defaults to 'false', which keeps
+      the historical behaviour of reporting the error and letting the workflow
+      continue.
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -182,6 +192,7 @@ runs:
         MAIN_BRANCH: ${{ inputs.main_branch }}
         PR_ID: ${{ inputs.pr_id }}
         PR_LINK: ${{ inputs.pr_link }}
+        FAIL_ON_SCAN_ERROR: ${{ inputs.fail_on_scan_error }}
       run: |
         echo "Running Upwind Scan"
         SCAN_START=$(date +%s)
@@ -213,6 +224,9 @@ runs:
         fi
         if [ -n "$PR_LINK" ]; then
           EXTRA_ARGS+=(--pr-link="$PR_LINK")
+        fi
+        if [ "$FAIL_ON_SCAN_ERROR" = "true" ]; then
+          EXTRA_ARGS+=(--fail-on-scan-error)
         fi
 
         # CI pipeline context from GitHub Actions' predefined variables.
@@ -247,12 +261,7 @@ runs:
           --block-on="${{ inputs.block_on}}" \
           --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}} \
           "${EXTRA_ARGS[@]}"
-        if [ ! -f "$OUTPUT_JSON" ]; then
-          echo "Error: $OUTPUT_JSON not found"
-          exit 1
-        fi
-
-        echo "Info: Image scan completed"
+        "${{ github.action_path }}/scripts/check_scan_output.sh" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR"
 
         # Scan duration for the comment footer.
         SCAN_ELAPSED=$(( $(date +%s) - SCAN_START ))
