@@ -133,10 +133,10 @@ alongside its source scans; a URL with no match is recorded as-is.
 
 ## Failing On Scan Errors
 
-By default the action reports a scan that could not run and lets the workflow
-continue, so an infrastructure problem does not block a merge. When the scan
-produces no result the step prints a GitHub error annotation instead of
-"Image scan completed".
+By default the action reports a scan that produced no result and lets the
+workflow continue, so an infrastructure problem does not block a merge. In that
+case the step prints a GitHub warning annotation instead of "Image scan
+completed".
 
 Set `fail_on_scan_error: true` to fail the step instead, for example when the
 image could not be unpacked by the scanner:

@@ -9,6 +9,15 @@ on:
   pull_request:
 
 jobs:
+  Tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Guard script tests
+        shell: bash
+        run: bash tests/check_scan_output_test.sh
+
   Build:
     runs-on: ubuntu-22.04
     timeout-minutes: 10

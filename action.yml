@@ -261,7 +261,7 @@ runs:
           --block-on="${{ inputs.block_on}}" \
           --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}} \
           "${EXTRA_ARGS[@]}"
-        bash "$GITHUB_ACTION_PATH/scripts/check_scan_output.sh" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR"
+        bash "${GITHUB_ACTION_PATH:-${{ github.action_path }}}/scripts/check_scan_output.sh" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR"
 
         # Scan duration for the comment footer.
         SCAN_ELAPSED=$(( $(date +%s) - SCAN_START ))
