@@ -291,6 +291,10 @@ runs:
           exit 0
         fi
 
+        # Regional tenants (eu/me/ap) share the global console host; only
+        # upwind.dev and private regions have a console of their own.
+        CONSOLE_HOST="console.$(echo "${UPWIND_URI:-upwind.io}" | sed -E 's/^(eu|me|ap)\.//')"
+
         # Marker for our sticky comment: we edit it in place each run. With no
         # DB (unlike SCA/IaC), history lives in a hidden base64 blob in the body.
         COMMENT_MARKER="<!-- upwind-image-scan-report -->"
@@ -467,7 +471,7 @@ runs:
 
         # Footer: Upwind Console link + scan time.
         if [ -n "$FINGERPRINT" ]; then
-          COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/?redirectToCodeScanId=${FINGERPRINT})"$'\n\n'
+          COMMENT+="[View full analysis in Upwind Console →](https://${CONSOLE_HOST}/?redirectToCodeScanId=${FINGERPRINT})"$'\n\n'
         fi
         if [ -n "${SCAN_DURATION_HUMAN:-}" ]; then
           COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
