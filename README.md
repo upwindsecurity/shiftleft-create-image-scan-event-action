@@ -1,5 +1,9 @@
 # Upwind Security ShiftLeft Create Image Scan Event Action
 
+**Using Bitbucket Pipelines instead of GitHub Actions?** This repo also
+ships the same image scan as a Bitbucket pipe - see
+[bitbucket/README.md](bitbucket/README.md).
+
 ## Overview
 
 The Upwind Security ShiftLeft Create Image Scan Event Action enables seamless integration of Docker image vulnerability scanning into your CI/CD workflows. This action notifies the Upwind Console of a built image, scans it for vulnerabilities, and can optionally block the workflow or post the results back to a pull request.
