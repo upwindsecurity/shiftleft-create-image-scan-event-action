@@ -46,7 +46,6 @@ echo "$OUT" | grep -q -- '--branch feature/x'; check "non-pr: branch" "$?"
 echo "$OUT" | grep -q -- '--pipeline-run-id=55'; check "non-pr: pipeline run id" "$?"
 echo "$OUT" | grep -q -- '--pipeline-run-link=https://bitbucket.org/ws/repo/pipelines/results/55'; check "non-pr: pipeline run link" "$?"
 if echo "$OUT" | grep -q -- '--pr-id'; then check "non-pr: no pr args" 1; else check "non-pr: no pr args" 0; fi
-echo "$OUT" | grep -q -- '--initiator={uuid-1}'; check "non-pr: initiator falls back to uuid" "$?"
 echo "$OUT" | grep -q 'not a pull-request pipeline; skipping Upwind PR comment'; check "non-pr: comment skipped" "$?"
 echo "$OUT" | grep -q -- '--docker-pull=true'; check "non-pr: docker-pull defaults true" "$?"
 echo "$OUT" | grep -q -- '--oci-client=docker'; check "non-pr: oci client docker" "$?"
@@ -80,6 +79,22 @@ echo "$OUT" | grep -q -- '--upwind-uri=upwind.dev'; check "knobs: uri override" 
 OUT=$(env "${BASE_ENV[@]/BITBUCKET_BRANCH=feature\/x/BITBUCKET_TAG=v9.9.9}" bash "$PIPE" 2>&1); RC=$?
 check "tag: exits 0" "$RC"
 echo "$OUT" | grep -q -- '--branch v9.9.9'; check "tag: branch falls back to tag" "$?"
+
+# ---- initiator fallback: commit author on non-PR pipelines, else uuid ----
+ABS_PIPE="$PWD/$PIPE"
+GITDIR=$(mktemp -d)
+git -C "$GITDIR" init -q
+git -C "$GITDIR" -c user.name='Test Author' -c user.email=t@e.st commit -q --allow-empty -m x
+OUT=$(cd "$GITDIR" && env "${BASE_ENV[@]}" bash "$ABS_PIPE" 2>&1); RC=$?
+check "git author: exits 0" "$RC"
+echo "$OUT" | grep -q -- '--initiator=Test Author'; check "git author: non-pr initiator is commit author" "$?"
+rm -rf "$GITDIR"
+
+NOGIT=$(mktemp -d)
+OUT=$(cd "$NOGIT" && env "${BASE_ENV[@]}" bash "$ABS_PIPE" 2>&1); RC=$?
+check "no git repo: exits 0" "$RC"
+echo "$OUT" | grep -q -- '--initiator={uuid-1}'; check "no git repo: initiator falls back to uuid" "$?"
+rmdir "$NOGIT"
 
 # ---- pre-provisioned binary seam ----
 TMPBIN=$(mktemp); printf '#!/bin/sh\n' > "$TMPBIN"; chmod +x "$TMPBIN"

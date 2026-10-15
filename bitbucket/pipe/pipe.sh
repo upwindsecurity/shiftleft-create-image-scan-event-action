@@ -80,6 +80,15 @@ if [ "$DRY_RUN" != "1" ] && [ -n "${UPWIND_COMMENT_TOKEN:-}" ] && [ -n "${BITBUC
     | jq -r '.author.display_name // empty' || true)
   [ -n "$DISPLAY" ] && INITIATOR="$DISPLAY"
 fi
+# Still a UUID (branch/tag pipelines, or no token): fall back to the commit
+# author from the clone - not always the triggerer, but readable. The pipe
+# container runs as root over a clone owned by another uid, so git needs
+# safe.directory before it will read it.
+if [ "$INITIATOR" = "${BITBUCKET_STEP_TRIGGERER_UUID:-bitbucket-pipelines}" ] && command -v git >/dev/null 2>&1; then
+  git config --global --add safe.directory '*' 2>/dev/null || true
+  AUTHOR=$(git log -1 --format=%an 2>/dev/null || true)
+  [ -n "$AUTHOR" ] && INITIATOR="$AUTHOR"
+fi
 
 SCAN_CMD=("$SHIFTLEFT" image
   --source=BITBUCKET
