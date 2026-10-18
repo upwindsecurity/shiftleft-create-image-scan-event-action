@@ -89,7 +89,7 @@ emit_table() {
   local cves_json="$1" summary="$2" with_fix="$3" open="${4:-0}" rows total
   rows=$(echo "$cves_json" | jq -r --argjson max "$MAX_ROWS" '
     [.[]][0:$max][]
-    | [ (.cveId // .cveName // "<unknown>"),
+    | [ (.cveId // .cveName // "unknown"),
         (.packageName // ""),
         (.packageVersion // ""),
         (.fixedInVersion // "") ]
@@ -107,7 +107,7 @@ emit_table() {
     COMMENT+=$'| CVE | Package | Version |\n|---|---|---|\n'
   fi
   while IFS=$'\t' read -r CVE PKG VER FIX; do
-    [ -z "${CVE}" ] && CVE="<unknown>"
+    [ -z "${CVE}" ] && CVE="unknown"
     case "$CVE" in
       CVE-*) CVE_CELL="[${CVE}](https://nvd.nist.gov/vuln/detail/${CVE})" ;;
       *)     CVE_CELL="${CVE}" ;;
@@ -229,18 +229,23 @@ PRIOR_HISTORY="[]"
 if [ "${UPWIND_ADO_DRY_RUN:-}" != "1" ]; then
   # One GET returns every thread of the PR. Match = first non-deleted thread
   # whose first non-deleted comment carries the marker.
-  if THREADS_JSON=$(curl -fsSL -H "$AUTH_HDR" "${THREADS_BASE}?${API_VER}" 2>/dev/null); then
+  # curl -f only fails on 4xx/5xx; ADO answers some bad credentials with a 2xx
+  # HTML sign-in page, so also require a JSON body with a `value` array before
+  # matching (comparing the printed type keeps this independent of how a given
+  # jq version reports parse errors).
+  MATCH=""
+  if THREADS_JSON=$(curl -fsSL -H "$AUTH_HDR" "${THREADS_BASE}?${API_VER}" 2>/dev/null) \
+     && [ "$(echo "$THREADS_JSON" | jq -r '.value | type' 2>/dev/null)" = "array" ]; then
     MATCH=$(echo "$THREADS_JSON" | jq -c --arg m "$COMMENT_MARKER" '
-      [ (.value // [])[]
+      [ .value[]
         | select((.isDeleted // false) | not)
         | . as $t
         | ([ ($t.comments // [])[] | select((.isDeleted // false) | not) ] | .[0]) as $c
         | select($c != null and (($c.content // "") | contains($m)))
         | {tid: $t.id, cid: $c.id, content: $c.content} ]
-      | .[0] // empty')
+      | .[0] // empty' 2>/dev/null) || MATCH=""
   else
     echo "Warning: could not list PR threads; posting a new report thread"
-    MATCH=""
   fi
   if [ -n "$MATCH" ]; then
     EXISTING_TID=$(echo "$MATCH" | jq -r '.tid')

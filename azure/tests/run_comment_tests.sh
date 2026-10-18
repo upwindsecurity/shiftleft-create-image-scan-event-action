@@ -64,6 +64,12 @@ run_dry tests/fixtures/empty.json
 check "empty: exits 0" "$RC"
 if [ -z "$BODY" ] || ! echo "$BODY" | grep -qF "$MARKER"; then check "empty: no comment body" 0; else check "empty: no comment body" 1; fi
 
+# CVE without an id renders a plain "unknown" cell (an <unknown> tag would be swallowed as HTML)
+printf '%s\n' '{"imageName":"x","imageVersion":"1","introducedCves":[{"severity":"LOW","packageName":"p"}],"resolvedCves":[],"noChangeCves":[]}' > "$TMP/noid.json"
+run_dry "$TMP/noid.json"
+echo "$BODY" | grep -q '^| unknown | `p` |'; check "noid: placeholder CVE cell is plain 'unknown'" "$?"
+echo "$BODY" | grep -qF '<unknown>'; [ "$?" -ne 0 ]; check "noid: no <unknown> html-like tag" "$?"
+
 # missing output file is the one nonzero path
 UPWIND_ADO_DRY_RUN=1 OUTPUT_JSON="$TMP/nope.json" bash "$SCRIPT" >/dev/null 2>&1
 [ "$?" -ne 0 ]; check "missing OUTPUT_JSON: exits nonzero" "$?"
@@ -126,7 +132,11 @@ class H(http.server.BaseHTTPRequestHandler):
         if body is not None: self.wfile.write(json.dumps(body).encode())
     def do_GET(self):
         self.log()
-        if self.path.startswith('/proj/_apis/git/repositories/repo/pullRequests/7/threads'):
+        if scenario in ("html200", "html203"):
+            # ADO answers some bad/expired credentials with a 2xx HTML sign-in page
+            self.send_response(int(scenario[4:])); self.send_header('Content-Type', 'text/html'); self.end_headers()
+            self.wfile.write(b"<html><body>Sign in to your account</body></html>")
+        elif self.path.startswith('/proj/_apis/git/repositories/repo/pullRequests/7/threads'):
             v = THREADS[scenario]; self.reply(200, {"count": len(v), "value": v})
         else: self.reply(404)
     def do_POST(self):
@@ -199,6 +209,14 @@ check "stub patch500: exits 0" "$RC"
 echo "$OUT" | grep -q 'Warning: failed to update'; check "stub patch500: warning printed" "$?"
 [ "$(jq -s '[.[] | select(.method=="PATCH" and (.path|test("/threads/2\\?")))] | length' "$LOG")" -eq 0 ]
 check "stub patch500: thread not re-closed after failed edit" "$?"
+
+# 2xx non-JSON threads response (HTML sign-in page): warning + exit 0, falls through to POST
+for sc in html200 html203; do
+  run_stub "$sc"
+  check "stub $sc: exits 0" "$RC"
+  echo "$OUT" | grep -q 'Warning: could not list PR threads'; check "stub $sc: list warning printed" "$?"
+  [ "$(jq -s '[.[] | select(.method=="POST")] | length' "$LOG")" -eq 1 ]; check "stub $sc: falls through to POST" "$?"
+done
 
 echo; echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
