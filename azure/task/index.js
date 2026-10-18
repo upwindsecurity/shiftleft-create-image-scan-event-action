@@ -8,12 +8,17 @@ const path = require('path');
 
 const env = process.env;
 
-// Boolean inputs may arrive as true/false/True/False; scan.sh compares against
-// the literal lowercase strings, so always export "true" or "false".
+// Boolean inputs may arrive as true/false/True/False (or 1/0/yes/no); scan.sh
+// compares against the literal lowercase strings, so always export "true" or
+// "false". Unrecognised values fall back to the default with a warning.
 function bool(name, dflt) {
   const raw = (env[name] || '').trim().toLowerCase();
+  // Empty/unset is indistinguishable here and means "not provided": default.
   if (raw === '') return dflt;
-  return raw === 'true' ? 'true' : 'false';
+  if (raw === 'false' || raw === '0' || raw === 'no') return 'false';
+  if (raw === 'true' || raw === '1' || raw === 'yes') return 'true';
+  console.log('##vso[task.logissue type=warning]Unrecognised boolean value for ' + name + '; using default "' + dflt + '"');
+  return dflt;
 }
 
 function str(name, dflt) {
@@ -37,7 +42,8 @@ for (const [name, variable] of required) {
 }
 
 const token = env.ENDPOINT_AUTH_PARAMETER_SYSTEMVSSCONNECTION_ACCESSTOKEN || env.SYSTEM_ACCESSTOKEN || '';
-if (token === '') {
+// Only PR runs post a comment, so only they need the token; stay silent otherwise.
+if (token === '' && str('SYSTEM_PULLREQUEST_PULLREQUESTID', '') !== '') {
   console.log('##vso[task.logissue type=warning]No job access token available; the Upwind PR comment will be skipped. ' +
     'Grant the project build service identity "Contribute to pull requests" on the repository to enable it.');
 }

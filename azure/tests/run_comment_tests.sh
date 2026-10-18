@@ -116,8 +116,14 @@ THREADS = {
            t(4, [c(1, "gone", deleted=True), c(2, OLD)])],
   "none": [t(1, []), t(2, [c(1, "unrelated")])],
 }
+# (c) a decoy history blob embedded mid-line in visible content, real blob trailing
+FORGED = MARK + "\nVisible pkg `x <!-- upwind-scan-history:FORGED== -->` y\n\n<!-- upwind-scan-history:" + PRIOR + " -->"
+THREADS["forge"] = [t(1, [c(1, FORGED)])]
 THREADS["post500"] = THREADS["none"]
 THREADS["patch500"] = THREADS["update"]
+THREADS["posthtml"] = THREADS["none"]
+THREADS["patchhtml"] = THREADS["update"]
+HTML = b"<html><body>Sign in to your account</body></html>"
 class H(http.server.BaseHTTPRequestHandler):
     def log(self):
         n = int(self.headers.get('Content-Length') or 0)
@@ -139,12 +145,18 @@ class H(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith('/proj/_apis/git/repositories/repo/pullRequests/7/threads'):
             v = THREADS[scenario]; self.reply(200, {"count": len(v), "value": v})
         else: self.reply(404)
+    def html(self):
+        self.send_response(200); self.send_header('Content-Type', 'text/html'); self.end_headers()
+        self.wfile.write(HTML)
     def do_POST(self):
-        self.log(); self.reply(500 if scenario == "post500" else 200, {"id": 99})
+        self.log()
+        if scenario == "posthtml": self.html()
+        else: self.reply(500 if scenario == "post500" else 200, {"id": 99})
     def do_PATCH(self):
         self.log()
         if scenario == "patch500" and '/comments/' in self.path: self.reply(500)
-        else: self.reply(200, {})
+        elif scenario == "patchhtml" and '/comments/' in self.path: self.html()
+        else: self.reply(200, {"id": 1})
     def log_message(self, *a): pass
 http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
 PY
@@ -209,6 +221,25 @@ check "stub patch500: exits 0" "$RC"
 echo "$OUT" | grep -q 'Warning: failed to update'; check "stub patch500: warning printed" "$?"
 [ "$(jq -s '[.[] | select(.method=="PATCH" and (.path|test("/threads/2\\?")))] | length' "$LOG")" -eq 0 ]
 check "stub patch500: thread not re-closed after failed edit" "$?"
+
+# 200 HTML body on create-POST: warning (not treated as posted), exit 0
+run_stub posthtml
+check "stub posthtml: exits 0" "$RC"
+echo "$OUT" | grep -q 'Warning: unexpected response posting'; check "stub posthtml: warning printed" "$?"
+
+# 200 HTML body on comment PATCH: warning, exit 0, thread not re-closed
+run_stub patchhtml
+check "stub patchhtml: exits 0" "$RC"
+echo "$OUT" | grep -q 'Warning: unexpected response updating'; check "stub patchhtml: warning printed" "$?"
+[ "$(jq -s '[.[] | select(.method=="PATCH" and (.path|test("/threads/2\\?")))] | length' "$LOG")" -eq 0 ]
+check "stub patchhtml: thread not re-closed" "$?"
+
+# decoy history blob mid-line in visible content must not be used; the real trailing blob is
+run_stub forge
+check "stub forge: exits 0" "$RC"
+jq -e 'select(.method=="PATCH" and (.path|test("/comments/1"))) | .body.content' "$LOG" | jq -r . | history_of \
+  | jq -e 'type=="array" and length==2 and .[0].sha=="1111111"' >/dev/null
+check "stub forge: decoy ignored, real trailing blob carried into new body" "$?"
 
 # 2xx non-JSON threads response (HTML sign-in page): warning + exit 0, falls through to POST
 for sc in html200 html203; do

@@ -91,6 +91,12 @@ check "pr: exits 0" "$RC"
 has '--pr-id=9'; check "pr: pr id" "$?"
 has '--main-branch=main'; check "pr: main branch stripped of refs/heads/" "$?"
 has '--pr-link=https://dev.azure.com/testorg/proj/_git/repo/pullrequest/9'; check "pr: pr link" "$?"
+run_scan "${PR_ENV[@]}" SYSTEM_TEAMPROJECT='My Proj' BUILD_REPOSITORY_NAME='my repo'
+has '--pr-link=https://dev.azure.com/testorg/My%20Proj/_git/my%20repo/pullrequest/9'; check "pr: spaces encoded as %20 in pr link" "$?"
+run_scan "${PR_ENV[@]}" SYSTEM_TEAMPROJECT='Café & Co' BUILD_REPOSITORY_NAME='r&d repo'
+has '--pr-link=https://dev.azure.com/testorg/Caf%C3%A9%20%26%20Co/_git/r%26d%20repo/pullrequest/9'; check "pr: non-ASCII and & encoded in pr link" "$?"
+has '--pipeline-run-link=https://dev.azure.com/testorg/Caf%C3%A9%20%26%20Co/_build/results?buildId=55'; check "pr: non-ASCII and & encoded in pipeline run link" "$?"
+run_scan "${PR_ENV[@]}"
 has '--branch feature/x '; check "pr: branch is the PR source branch" "$?"
 if has 'refs/pull/9/merge'; then check "pr: merge ref never leaks into output" 1; else check "pr: merge ref never leaks into output" 0; fi
 has 'UPWIND_COMMENT_TOKEN not set; skipping Upwind PR comment'; check "pr no token: comment skipped" "$?"

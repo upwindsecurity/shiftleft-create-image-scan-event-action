@@ -66,12 +66,12 @@ elif [ "$DRY_RUN" != "1" ]; then
   chmod +x "$SHIFTLEFT"
 fi
 
-# ---- Azure DevOps URLs (spaces in the project/repo name are percent-encoded) ----
+# ---- Azure DevOps URLs (project/repo segments are percent-encoded, same
+# approach as upwind_ado_comment.sh; printf '%s' leaves no trailing newline) ----
+PROJECT_ENC=$(printf '%s' "${SYSTEM_TEAMPROJECT:-}" | jq -sRr @uri)
+REPO_NAME_ENC=$(printf '%s' "${BUILD_REPOSITORY_NAME:-}" | jq -sRr @uri)
 ADO_BASE="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI:-}"
-ADO_BASE="${ADO_BASE%/}/${SYSTEM_TEAMPROJECT:-}"
-ADO_BASE="${ADO_BASE// /%20}"
-REPO_NAME_ENC="${BUILD_REPOSITORY_NAME:-}"
-REPO_NAME_ENC="${REPO_NAME_ENC// /%20}"
+ADO_BASE="${ADO_BASE%/}/${PROJECT_ENC}"
 
 # ---- Branch / PR context ----
 # On PR runs BUILD_SOURCEBRANCH is refs/pull/N/merge, so the branch under scan

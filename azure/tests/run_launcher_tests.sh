@@ -67,6 +67,19 @@ has 'UPWIND_DOCKER_PULL=false'; check "bool: INPUT_DOCKERPULL=False -> false" "$
 has 'UPWIND_ENFORCE_BLOCK_POLICY=true'; check "bool: INPUT_ENFORCEBLOCKPOLICY=True -> true" "$?"
 run_launcher INPUT_POSTCOMMENT=TRUE SYSTEM_ACCESSTOKEN=t
 has 'UPWIND_POST_COMMENT=true'; check "bool: TRUE -> true" "$?"
+run_launcher INPUT_DOCKERPULL=1 INPUT_ENFORCEBLOCKPOLICY=yes INPUT_POSTCOMMENT=0 SYSTEM_ACCESSTOKEN=t
+has 'UPWIND_DOCKER_PULL=true'; check "bool: INPUT_DOCKERPULL=1 -> true" "$?"
+has 'UPWIND_ENFORCE_BLOCK_POLICY=true'; check "bool: yes -> true" "$?"
+has 'UPWIND_POST_COMMENT=false'; check "bool: INPUT_POSTCOMMENT=0 -> false" "$?"
+hasnt 'Unrecognised boolean'; check "bool: recognised forms emit no warning" "$?"
+run_launcher INPUT_POSTCOMMENT=' No ' SYSTEM_ACCESSTOKEN=t
+has 'UPWIND_POST_COMMENT=false'; check "bool: ' No ' (trimmed, case-insensitive) -> false" "$?"
+run_launcher INPUT_POSTCOMMENT=garbage INPUT_DOCKERPULL=maybe INPUT_ENFORCEBLOCKPOLICY=whatever SYSTEM_ACCESSTOKEN=t
+check "bool: garbage -> still exits 0" "$RC"
+has 'UPWIND_POST_COMMENT=true'; check "bool: INPUT_POSTCOMMENT=garbage -> default true" "$?"
+has 'UPWIND_DOCKER_PULL=true'; check "bool: INPUT_DOCKERPULL=maybe -> default true" "$?"
+has 'UPWIND_ENFORCE_BLOCK_POLICY=false'; check "bool: INPUT_ENFORCEBLOCKPOLICY=whatever -> default false" "$?"
+has 'Unrecognised boolean value for INPUT_POSTCOMMENT'; check "bool: garbage warning names the input" "$?"
 
 # ---- token precedence ----
 run_launcher ENDPOINT_AUTH_PARAMETER_SYSTEMVSSCONNECTION_ACCESSTOKEN=job-token SYSTEM_ACCESSTOKEN=sys-token
@@ -77,10 +90,14 @@ run_launcher SYSTEM_ACCESSTOKEN=sys-token
 has 'UPWIND_COMMENT_TOKEN=sys-token'; check "token: falls back to SYSTEM_ACCESSTOKEN" "$?"
 hasnt 'Contribute to pull requests'; check "token: no warning when a token exists" "$?"
 
-run_launcher
-check "token: none -> still exits 0" "$RC"
+run_launcher SYSTEM_PULLREQUEST_PULLREQUESTID=9
+check "token: none (PR run) -> still exits 0" "$RC"
 echo "$OUT" | grep -qE '^UPWIND_COMMENT_TOKEN=$'; check "token: none -> exported empty" "$?"
-has 'Contribute to pull requests'; check "token: none -> warning names the grant" "$?"
+has 'Contribute to pull requests'; check "token: none on a PR run -> warning names the grant" "$?"
+
+run_launcher
+check "token: none (non-PR run) -> still exits 0" "$RC"
+hasnt 'Contribute to pull requests'; check "token: none on a non-PR run -> no warning" "$?"
 
 # ---- required inputs ----
 for pair in "INPUT_IMAGE:image" "INPUT_CLIENTID:clientId" "INPUT_CLIENTSECRET:clientSecret"; do

@@ -250,8 +250,11 @@ if [ "${UPWIND_ADO_DRY_RUN:-}" != "1" ]; then
   if [ -n "$MATCH" ]; then
     EXISTING_TID=$(echo "$MATCH" | jq -r '.tid')
     EXISTING_CID=$(echo "$MATCH" | jq -r '.cid')
-    PRIOR_B64=$(echo "$MATCH" | jq -r '.content' \
-      | sed -n "s/.*${HISTORY_PREFIX}\([A-Za-z0-9+/=]*\) -->.*/\1/p" | head -n1)
+    # Only a line consisting solely of the hidden-state blob counts, and the
+    # LAST such line wins: visible content (e.g. a package name) can embed
+    # the pattern mid-line but cannot forge a standalone trailing line.
+    PRIOR_B64=$(echo "$MATCH" | jq -r '.content' | tr -d '\r' \
+      | sed -n "s/^${HISTORY_PREFIX}\([A-Za-z0-9+/=]*\) -->\$/\1/p" | tail -n1)
     if [ -n "$PRIOR_B64" ]; then
       DECODED=$(printf '%s' "$PRIOR_B64" | base64 -d 2>/dev/null || echo "")
       if echo "$DECODED" | jq -e 'type=="array"' >/dev/null 2>&1; then
@@ -323,22 +326,32 @@ PAYLOAD_FILE="$(mktemp)"
 if [ -n "$EXISTING_TID" ]; then
   echo "Updating existing PR thread ($EXISTING_TID) with new scan + history"
   printf '%s' "$COMMENT" | jq -Rs '{ content: . }' > "$PAYLOAD_FILE"
-  if curl -fsSL -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
+  # curl -f only catches 4xx/5xx; a 2xx HTML body (e.g. a sign-in page) must
+  # not count as success, so also require a JSON body carrying an `id`.
+  if RESP=$(curl -fsSL -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
        --data @"$PAYLOAD_FILE" \
-       "${THREADS_BASE}/${EXISTING_TID}/comments/${EXISTING_CID}?${API_VER}" >/dev/null; then
-    # Editing a comment reactivates its thread; keep the report closed.
-    curl -fsSL -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
-      --data '{"status":"closed"}' \
-      "${THREADS_BASE}/${EXISTING_TID}?${API_VER}" >/dev/null \
-      || echo "Warning: failed to re-close Upwind PR thread ($EXISTING_TID)"
+       "${THREADS_BASE}/${EXISTING_TID}/comments/${EXISTING_CID}?${API_VER}"); then
+    if echo "$RESP" | jq -e '.id' >/dev/null 2>&1; then
+      # Editing a comment reactivates its thread; keep the report closed.
+      curl -fsSL -X PATCH -H "$AUTH_HDR" -H "Content-Type: application/json" \
+        --data '{"status":"closed"}' \
+        "${THREADS_BASE}/${EXISTING_TID}?${API_VER}" >/dev/null \
+        || echo "Warning: failed to re-close Upwind PR thread ($EXISTING_TID)"
+    else
+      echo "Warning: unexpected response updating Upwind PR comment (thread $EXISTING_TID); the report may not have been updated"
+    fi
   else
     echo "Warning: failed to update Upwind PR comment (thread $EXISTING_TID)"
   fi
 else
   echo "Posting new report thread on PR #${SYSTEM_PULLREQUEST_PULLREQUESTID:-}"
   printf '%s' "$COMMENT" | jq -Rs '{ comments: [ { parentCommentId: 0, content: ., commentType: 1 } ], status: "closed" }' > "$PAYLOAD_FILE"
-  curl -fsSL -X POST -H "$AUTH_HDR" -H "Content-Type: application/json" \
-    --data @"$PAYLOAD_FILE" "${THREADS_BASE}?${API_VER}" >/dev/null \
-    || echo "Warning: failed to post Upwind PR comment"
+  if RESP=$(curl -fsSL -X POST -H "$AUTH_HDR" -H "Content-Type: application/json" \
+       --data @"$PAYLOAD_FILE" "${THREADS_BASE}?${API_VER}"); then
+    echo "$RESP" | jq -e '.id' >/dev/null 2>&1 \
+      || echo "Warning: unexpected response posting Upwind PR comment; the report was not posted"
+  else
+    echo "Warning: failed to post Upwind PR comment"
+  fi
 fi
 rm -f "$PAYLOAD_FILE" "$ARRAY"
