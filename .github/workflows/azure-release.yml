@@ -1,0 +1,79 @@
+# Publishes the Upwind image scan Azure DevOps extension to the Visual Studio
+# Marketplace. The extension versions independently of the GitHub action
+# (`v*.*.*`) and the Bitbucket pipe (`bitbucket-v*.*.*`), in its own tag
+# namespaces:
+#   azure-dev-vX.Y.Z -> azure/vss-extension.dev.json (upwind-image-scan-dev, private)
+#   azure-vX.Y.Z     -> azure/vss-extension.json     (upwind-image-scan)
+#
+# Requires the repo secret AZURE_MARKETPLACE_PAT: a Personal Access Token with
+# the Marketplace "Publish" scope, issued to a member of the Marketplace
+# publisher that owns the extension. The repo admin creates it.
+name: Azure Task Release
+
+on:
+  push:
+    tags:
+      - 'azure-v*.*.*'
+      - 'azure-dev-v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Comment script tests
+        run: bash azure/tests/run_comment_tests.sh
+
+      - name: Task tests
+        run: bash azure/tests/run_task_tests.sh
+
+      - name: Launcher tests
+        run: bash azure/tests/run_launcher_tests.sh
+
+      # Derive VERSION and MANIFEST from the tag with an explicit match on the
+      # whole ref name, so an azure-dev-v* tag can never select the prod
+      # manifest. The version must be strictly numeric X.Y.Z.
+      - name: Resolve version and manifest from tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^azure-dev-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            MANIFEST=azure/vss-extension.dev.json
+          elif [[ "$TAG" =~ ^azure-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            MANIFEST=azure/vss-extension.json
+          else
+            echo "::error::Unsupported tag '$TAG' (expected azure-vX.Y.Z or azure-dev-vX.Y.Z)"
+            exit 1
+          fi
+          VERSION="${BASH_REMATCH[1]}"
+          echo "Releasing $VERSION with $MANIFEST"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "MANIFEST=$MANIFEST" >> "$GITHUB_ENV"
+
+      # Both versions must bump or Azure DevOps ignores the update: the
+      # extension manifest version and the task.json version object.
+      - name: Sync versions
+        run: |
+          set -euo pipefail
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          jq --arg v "$VERSION" '.version = $v' "$MANIFEST" > "$MANIFEST.tmp"
+          mv "$MANIFEST.tmp" "$MANIFEST"
+          jq --argjson maj "$MAJOR" --argjson min "$MINOR" --argjson pat "$PATCH" \
+            '.version = {Major: $maj, Minor: $min, Patch: $pat}' \
+            azure/task/task.json > azure/task/task.json.tmp
+          mv azure/task/task.json.tmp azure/task/task.json
+          jq '.version' "$MANIFEST" azure/task/task.json
+
+      - name: Publish extension
+        env:
+          AZURE_MARKETPLACE_PAT: ${{ secrets.AZURE_MARKETPLACE_PAT }}
+        run: |
+          npx tfx-cli extension publish \
+            --manifest-globs "$MANIFEST" \
+            --token "$AZURE_MARKETPLACE_PAT" \
+            --no-prompt

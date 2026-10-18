@@ -1,0 +1,23 @@
+name: Azure Task CI
+
+on:
+  pull_request:
+    paths: ['azure/**', '.github/workflows/azure-*.yml']
+  push:
+    branches: [main]
+    paths: ['azure/**', '.github/workflows/azure-*.yml']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Comment script tests
+        run: bash azure/tests/run_comment_tests.sh
+
+      - name: Task tests
+        run: bash azure/tests/run_task_tests.sh
+
+      - name: Launcher tests
+        run: bash azure/tests/run_launcher_tests.sh
