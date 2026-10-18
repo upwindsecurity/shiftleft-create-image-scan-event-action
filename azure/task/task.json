@@ -1,0 +1,105 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Microsoft/azure-pipelines-task-lib/master/tasks.schema.json",
+  "id": "ea624d6a-e70c-4b24-af0a-10f09bfac6c4",
+  "name": "UpwindImageScan",
+  "friendlyName": "Upwind Image Scan",
+  "description": "Scan a container image with Upwind ShiftLeft and comment the results on the pull request",
+  "helpMarkDown": "Scans a container image for vulnerabilities, secrets and malware with Upwind ShiftLeft. On pull request builds the results are posted as a sticky comment thread. Grant the project build service identity 'Contribute to pull requests' on the repository to enable the comment.",
+  "category": "Build",
+  "author": "Upwind",
+  "version": {
+    "Major": 0,
+    "Minor": 0,
+    "Patch": 1
+  },
+  "instanceNameFormat": "Upwind image scan $(image)",
+  "inputs": [
+    {
+      "name": "image",
+      "type": "string",
+      "label": "Image",
+      "required": true,
+      "helpMarkDown": "Image to scan, for example myapp:$(Build.SourceVersion)."
+    },
+    {
+      "name": "clientId",
+      "type": "string",
+      "label": "Upwind client ID",
+      "required": true,
+      "helpMarkDown": "Upwind ShiftLeft credential client ID."
+    },
+    {
+      "name": "clientSecret",
+      "type": "string",
+      "label": "Upwind client secret",
+      "required": true,
+      "helpMarkDown": "Upwind ShiftLeft credential client secret. Pass a secret pipeline variable, for example $(UPWIND_CLIENT_SECRET)."
+    },
+    {
+      "name": "upwindUri",
+      "type": "string",
+      "label": "Upwind domain",
+      "defaultValue": "upwind.io",
+      "required": false,
+      "helpMarkDown": "Upwind domain, upwind.io (default) or upwind.dev."
+    },
+    {
+      "name": "blockOn",
+      "type": "pickList",
+      "label": "Block on",
+      "defaultValue": "",
+      "required": false,
+      "options": {
+        "": "Never block",
+        "do_not_deploy": "do_not_deploy",
+        "deploy_with_caution": "deploy_with_caution"
+      },
+      "helpMarkDown": "Fail the task when the image verdict reaches this level."
+    },
+    {
+      "name": "enforceBlockPolicy",
+      "type": "boolean",
+      "label": "Enforce organization block policy",
+      "defaultValue": false,
+      "required": false,
+      "helpMarkDown": "Fail the task when the organization's Upwind PR block policy blocks the image."
+    },
+    {
+      "name": "dockerPull",
+      "type": "boolean",
+      "label": "Pull image",
+      "defaultValue": true,
+      "required": false,
+      "helpMarkDown": "Pull the image before scanning. Disable when the image was built earlier in this pipeline."
+    },
+    {
+      "name": "agentChannel",
+      "type": "string",
+      "label": "Agent channel",
+      "defaultValue": "stable",
+      "required": false,
+      "helpMarkDown": "ShiftLeft release channel to download."
+    },
+    {
+      "name": "postComment",
+      "type": "boolean",
+      "label": "Post PR comment",
+      "defaultValue": true,
+      "required": false,
+      "helpMarkDown": "Post the scan results as a comment thread on pull request builds."
+    }
+  ],
+  "execution": {
+    "Node20_1": {
+      "target": "index.js"
+    }
+  },
+  "restrictions": {
+    "commands": {
+      "mode": "restricted"
+    },
+    "settableVariables": {
+      "allowed": []
+    }
+  }
+}
