@@ -5,9 +5,20 @@
 #   azure-dev-vX.Y.Z -> azure/vss-extension.dev.json (upwind-image-scan-dev, private)
 #   azure-vX.Y.Z     -> azure/vss-extension.json     (upwind-image-scan)
 #
-# Requires the repo secret AZURE_MARKETPLACE_PAT: a Personal Access Token with
-# the Marketplace "Publish" scope, issued to a member of the Marketplace
-# publisher that owns the extension. The repo admin creates it.
+# Authenticates to the Marketplace with Microsoft Entra OIDC; there is no
+# stored secret. The job requests a GitHub OIDC token (environment
+# `marketplace`), azure/login exchanges it for an Entra token as the app
+# registration `upwind-marketplace-publisher-ci`, and the VSIX is uploaded
+# through the Marketplace Gallery REST API with that bearer token.
+# One-time setup:
+#   - The app has a federated credential with subject
+#     repo:upwindsecurity/shiftleft-create-image-scan-event-action:environment:marketplace
+#     (issuer https://token.actions.githubusercontent.com,
+#     audience api://AzureADTokenExchange).
+#   - The app's service principal is a member (Contributor) of the Marketplace
+#     publisher `upwindsecurity`.
+#   - Repo variables AZURE_MARKETPLACE_CLIENT_ID and AZURE_TENANT_ID hold the
+#     app and tenant ids (public identifiers, not secrets).
 name: Azure Task Release
 
 on:
@@ -18,10 +29,12 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: marketplace
     steps:
       - uses: actions/checkout@v6
 
@@ -69,11 +82,65 @@ jobs:
           mv azure/task/task.json.tmp azure/task/task.json
           jq '.version' "$MANIFEST" azure/task/task.json
 
-      - name: Publish extension
-        env:
-          AZURE_MARKETPLACE_PAT: ${{ secrets.AZURE_MARKETPLACE_PAT }}
+      # Packaging needs no credentials.
+      - name: Package extension
         run: |
-          npx tfx-cli extension publish \
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vsix"
+          npx tfx-cli extension create \
             --manifest-globs "$MANIFEST" \
-            --token "$AZURE_MARKETPLACE_PAT" \
+            --output-path "$RUNNER_TEMP/vsix" \
             --no-prompt
+          ls "$RUNNER_TEMP/vsix"/*.vsix
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_MARKETPLACE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      # Resource 499b84ac-1321-427f-aa17-267ca6975798 is Azure DevOps, which
+      # the Marketplace accepts. POST creates a new extension, PUT updates an
+      # existing one; any non-2xx response fails the job with its body.
+      - name: Publish extension
+        run: |
+          set -euo pipefail
+          PUBLISHER=$(jq -r '.publisher' "$MANIFEST")
+          EXT_ID=$(jq -r '.id' "$MANIFEST")
+          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
+          BASE="https://marketplace.visualstudio.com/_apis/gallery/publishers/$PUBLISHER/extensions"
+          API="api-version=7.1-preview.2"
+
+          TOKEN=$(az account get-access-token \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query accessToken --output tsv)
+          echo "::add-mask::$TOKEN"
+
+          BODY="$RUNNER_TEMP/response.json"
+          status() {
+            curl --silent --show-error --output "$BODY" --write-out '%{http_code}' \
+              --header "Authorization: Bearer $TOKEN" "$@"
+          }
+
+          EXISTS=$(status "$BASE/$EXT_ID?$API")
+          case "$EXISTS" in
+            200) METHOD=PUT;  URL="$BASE/$EXT_ID?$API" ;;
+            404) METHOD=POST; URL="$BASE?$API" ;;
+            *)
+              echo "::error::Lookup of $PUBLISHER.$EXT_ID failed with HTTP $EXISTS"
+              cat "$BODY"
+              exit 1
+              ;;
+          esac
+
+          echo "Uploading $(basename "$VSIX") with $METHOD"
+          CODE=$(status --request "$METHOD" \
+            --header 'Content-Type: application/octet-stream' \
+            --data-binary "@$VSIX" "$URL")
+          if [[ ! "$CODE" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Marketplace upload failed with HTTP $CODE"
+            cat "$BODY"
+            exit 1
+          fi
+          echo "Published $PUBLISHER.$EXT_ID $VERSION (HTTP $CODE)"
