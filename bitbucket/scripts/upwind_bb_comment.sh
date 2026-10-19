@@ -191,7 +191,13 @@ while IFS= read -r scan; do
 done < <(jq -c '.[]' "$ARRAY")
 
 if [ -n "$FINGERPRINT" ]; then
-  COMMENT+="[View full analysis in Upwind Console →](https://console.${UPWIND_URI:-upwind.io}/?redirectToCodeScanId=${FINGERPRINT})"$'\n\n'
+  # Shared regions (eu/me/ap) use the global console; dedicated deployments
+  # (e.g. pdc02.upwind.io) keep their own. Mirrors the CLI's consoleScanURL.
+  CONSOLE_HOST="${UPWIND_URI:-upwind.io}"
+  case "$CONSOLE_HOST" in
+    eu.*|me.*|ap.*) CONSOLE_HOST="${CONSOLE_HOST#*.}" ;;
+  esac
+  COMMENT+="[View full analysis in Upwind Console →](https://console.${CONSOLE_HOST}/?redirectToCodeScanId=${FINGERPRINT})"$'\n\n'
 fi
 if [ -n "${SCAN_DURATION_HUMAN:-}" ]; then
   COMMENT+="_Scan completed in ${SCAN_DURATION_HUMAN}_"$'\n'
