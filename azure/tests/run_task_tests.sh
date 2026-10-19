@@ -56,6 +56,12 @@ OUT=$(env UPWIND_PIPE_DRY_RUN=1 UPWIND_CLIENT_ID=c UPWIND_CLIENT_SECRET=s bash "
 [ "$RC" -ne 0 ]; check "missing docker image: nonzero exit" "$?"
 has 'UPWIND_DOCKER_IMAGE'; check "missing docker image: names the variable" "$?"
 
+# ---- repository URL: userinfo stripped from the ADO clone URL ----
+run_scan BUILD_REPOSITORY_URI='https://myorg@dev.azure.com/myorg/proj/_git/repo'
+check "repo userinfo: exits 0" "$RC"
+has '--repository https://dev.azure.com/myorg/proj/_git/repo '; check "repo userinfo: org@ stripped to canonical URL" "$?"
+if has '--repository https://myorg@'; then check "repo userinfo: no userinfo in repository flag" 1; else check "repo userinfo: no userinfo in repository flag" 0; fi
+
 # ---- non-PR run: no PR args, pipeline args present ----
 run_scan
 check "non-pr: exits 0" "$RC"

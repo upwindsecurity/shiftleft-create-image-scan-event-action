@@ -87,6 +87,10 @@ fi
 BRANCH="${BRANCH#refs/heads/}"
 BRANCH="${BRANCH#refs/tags/}"
 
+# BUILD_REPOSITORY_URI is the clone URL with the org as userinfo
+# (https://org@dev.azure.com/...); report the canonical form instead.
+REPOSITORY_URL=$(printf '%s' "${BUILD_REPOSITORY_URI:-}" | sed 's#^\(https\{0,1\}://\)[^/@]*@#\1#')
+
 set --
 if [ "$IS_PR" = "true" ]; then
   MAIN_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
@@ -107,7 +111,7 @@ SCAN_CMD=("$SHIFTLEFT" image
   --docker-image "${DOCKER_IMAGE}"
   --commit-sha "${BUILD_SOURCEVERSION:-}"
   --branch "${BRANCH}"
-  --repository "${BUILD_REPOSITORY_URI:-}"
+  --repository "${REPOSITORY_URL}"
   --output-json="${OUTPUT_JSON}"
   --block-on="${BLOCK_ON}"
   --enforce-block-policy="${ENFORCE_BLOCK_POLICY}"
