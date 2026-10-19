@@ -58,3 +58,20 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Bitbucket pulls pipes anonymously, and ghcr packages start private, so
+      # a private package means every customer pull fails. Fail the release
+      # until an org admin flips the package to Public (one-time); rerun after.
+      - name: Check package is public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          visibility=$(gh api "/orgs/${{ github.repository_owner }}/packages/container/code-image-scan-bitbucket" --jq .visibility 2>/dev/null) || {
+            echo "::warning::Could not read package visibility (fork or missing permission); verify it is Public manually."
+            exit 0
+          }
+          if [ "$visibility" != "public" ]; then
+            echo "::error::ghcr.io/${{ github.repository_owner }}/code-image-scan-bitbucket is '$visibility'. Customers cannot pull it: an org admin must set the package to Public (package settings > Danger Zone > Change visibility), then rerun this workflow."
+            exit 1
+          fi
+          echo "Package is public."

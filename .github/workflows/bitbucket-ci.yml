@@ -1,11 +1,13 @@
 name: Bitbucket Pipe CI
 
+# scripts/check_scan_output.sh is shared with the GitHub action and baked
+# into the pipe image, so changes to it must run the pipe suite too.
 on:
   pull_request:
-    paths: ['bitbucket/**', '.github/workflows/bitbucket-*.yml']
+    paths: ['bitbucket/**', '.github/workflows/bitbucket-*.yml', 'scripts/check_scan_output.sh']
   push:
     branches: [main]
-    paths: ['bitbucket/**', '.github/workflows/bitbucket-*.yml']
+    paths: ['bitbucket/**', '.github/workflows/bitbucket-*.yml', 'scripts/check_scan_output.sh']
 
 jobs:
   test:

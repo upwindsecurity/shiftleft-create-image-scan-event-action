@@ -87,9 +87,9 @@ token. Scopes: **Pull requests: Read and Write**. Store it as the secured
 repository variable `UPWIND_COMMENT_TOKEN`. Without it the scan still runs
 and reports to the Console; only the PR comment is skipped.
 
-The token is also used to show a human-readable "initiated by" name in the
-Console (the PR author); without it, scans are attributed to the pipeline
-triggerer's UUID.
+The token is also used to show the PR author as the "initiated by" name in
+the Console; without it (and on branch pipelines), scans are attributed to
+the commit author instead.
 
 ## Blocking merges
 
