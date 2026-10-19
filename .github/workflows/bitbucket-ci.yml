@@ -23,7 +23,8 @@ jobs:
         run: bash tests/run_pipe_tests.sh
 
       - name: Build pipe image
-        run: docker build -t pipe-under-test .
+        working-directory: ${{ github.workspace }}
+        run: docker build -f bitbucket/Dockerfile -t pipe-under-test .
 
       - name: Dry-run smoke test (inside the image)
         run: |

@@ -41,8 +41,13 @@ updates one comment per PR.
 
    The pipe shares the step's docker daemon, so an image built earlier in
    the same step needs no tar handoff - just set `UPWIND_DOCKER_PULL=false`.
-   Images already in a registry need neither: set `UPWIND_DOCKER_IMAGE` to
+   Images in a public registry need neither: set `UPWIND_DOCKER_IMAGE` to
    the registry path and leave `UPWIND_DOCKER_PULL` on its default (`true`).
+   For a private registry, also pass `UPWIND_DOCKER_USER` and
+   `UPWIND_DOCKER_PASSWORD` - the pipe runs in its own container, so a
+   `docker login` done earlier in your step does not reach it. (Alternatively,
+   `docker pull` the image in your own script lines and set
+   `UPWIND_DOCKER_PULL: 'false'`.)
 
 3. Open a pull request. The scan runs, the results land in the Upwind
    Console, and (with `UPWIND_COMMENT_TOKEN` set) the report comment appears
@@ -65,6 +70,10 @@ the pipe always fetches from your configured release channel.
 | `UPWIND_BLOCK_ON` | no | Fail the step on scan recommendation: `do_not_deploy` or `deploy_with_caution` |
 | `UPWIND_ENFORCE_BLOCK_POLICY` | no | `true` to fail the step when the scan violates your org's PR-block policy |
 | `UPWIND_DOCKER_PULL` | no | `false` when the image is built in the same pipeline (default `true`: pull from registry) |
+| `UPWIND_DOCKER_USER` | no | Registry user for pulling from a private registry |
+| `UPWIND_DOCKER_PASSWORD` | no | Registry password/token for pulling from a private registry |
+| `UPWIND_ADDITIONAL_REGISTRIES` | no | Comma-separated additional registries to associate with the image |
+| `UPWIND_FAIL_ON_SCAN_ERROR` | no | `true` to fail the step when the scan could not complete at all (default `false`: report and continue) |
 | `UPWIND_AGENT_CHANNEL` | no | Release channel of the `shiftleft` binary (default `stable`) |
 
 Pipes only see the variables you pass in the `variables:` block (plus
@@ -90,6 +99,10 @@ organization's PR-block policy is violated. The red build shows on the PR;
 workspaces on Bitbucket Premium can make it binding with a merge check that
 requires passing builds. The report comment is still posted before the pipe
 exits.
+
+When you rely on blocking, also set `UPWIND_FAIL_ON_SCAN_ERROR: 'true'`:
+without it a scan that could not complete at all (and so produced no
+recommendation to block on) reports the error and lets the build pass.
 
 ## Troubleshooting
 

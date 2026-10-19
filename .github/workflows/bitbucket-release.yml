@@ -16,6 +16,14 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      # Only exact bitbucket-vX.Y.Z tags may publish: an rc/prerelease tag
+      # (bitbucket-v0.2.0-rc1) matches the trigger glob, and without this guard
+      # it would re-publish the release docker tags with prerelease code.
+      - name: Validate release tag
+        run: |
+          [[ "${{ github.ref_name }}" =~ ^bitbucket-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "Not an exact release tag: ${{ github.ref_name }}"; exit 1; }
+
       - uses: actions/checkout@v6
 
       - name: Tests
@@ -38,13 +46,14 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/code-image-scan-bitbucket
           tags: |
-            type=match,pattern=bitbucket-(v\d+\.\d+\.\d+),group=1
-            type=match,pattern=bitbucket-(v\d+)\.,group=1
+            type=match,pattern=^bitbucket-(v\d+\.\d+\.\d+)$,group=1
+            type=match,pattern=^bitbucket-(v\d+)\.\d+\.\d+$,group=1
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
         with:
-          context: bitbucket
+          context: .
+          file: bitbucket/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

@@ -17,6 +17,17 @@
 #   UPWIND_ENFORCE_BLOCK_POLICY optional  true to fail on org PR-block policy
 #   UPWIND_DOCKER_PULL          optional  false when the image was built in
 #                                         this pipeline (default true)
+#   UPWIND_DOCKER_USER          optional  registry user, for images pulled from
+#   UPWIND_DOCKER_PASSWORD      optional  a private registry (the pipe container
+#                                         does not see docker logins done in the
+#                                         customer step)
+#   UPWIND_ADDITIONAL_REGISTRIES optional comma-separated registries to also
+#                                         associate with the image
+#   UPWIND_FAIL_ON_SCAN_ERROR   optional  true to fail the step when the scan
+#                                         could not complete at all (the CLI
+#                                         fails open by default); recommended
+#                                         together with UPWIND_BLOCK_ON /
+#                                         UPWIND_ENFORCE_BLOCK_POLICY
 #   UPWIND_AGENT_CHANNEL        optional  shiftleft release channel (stable)
 # Test seams:
 #   UPWIND_PIPE_DRY_RUN=1   print the resolved scan command and the comment
@@ -25,10 +36,15 @@
 #                           the OAuth + download (e2e with pre-release builds).
 #   UPWIND_COMMENT_SCRIPT   override the comment script location (default
 #                           /usr/local/bin/upwind_bb_comment.sh in the image).
+#   UPWIND_CHECK_SCRIPT     override the scan-output guard location (default
+#                           /usr/local/bin/check_scan_output.sh in the image).
+#   BB_API_BASE             override the Bitbucket API base (stub server).
 set -eu
 
 DRY_RUN="${UPWIND_PIPE_DRY_RUN:-0}"
 COMMENT_SCRIPT="${UPWIND_COMMENT_SCRIPT:-/usr/local/bin/upwind_bb_comment.sh}"
+CHECK_SCRIPT="${UPWIND_CHECK_SCRIPT:-/usr/local/bin/check_scan_output.sh}"
+BB_API="${BB_API_BASE:-https://api.bitbucket.org/2.0}"
 
 CLIENT_ID="${UPWIND_CLIENT_ID:?set UPWIND_CLIENT_ID in the pipe variables (Upwind sensor credential id)}"
 CLIENT_SECRET="${UPWIND_CLIENT_SECRET:?set UPWIND_CLIENT_SECRET in the pipe variables (Upwind sensor credential secret)}"
@@ -38,6 +54,10 @@ BLOCK_ON="${UPWIND_BLOCK_ON:-}"                     # do_not_deploy | deploy_wit
 ENFORCE_BLOCK_POLICY="${UPWIND_ENFORCE_BLOCK_POLICY:-false}"
 DOCKER_PULL="${UPWIND_DOCKER_PULL:-true}"           # false when the image is built in this pipeline
 AGENT_CHANNEL="${UPWIND_AGENT_CHANNEL:-stable}"
+DOCKER_USER="${UPWIND_DOCKER_USER:-}"
+DOCKER_PASSWORD="${UPWIND_DOCKER_PASSWORD:-}"
+ADDITIONAL_REGISTRIES="${UPWIND_ADDITIONAL_REGISTRIES:-}"
+FAIL_ON_SCAN_ERROR="${UPWIND_FAIL_ON_SCAN_ERROR:-false}"
 OUTPUT_JSON="upwind-shift-left.json"
 
 SHIFTLEFT="${UPWIND_SHIFTLEFT_PATH:-./shiftleft}"
@@ -76,7 +96,7 @@ set -- "$@" --pipeline-run-link="https://bitbucket.org/${BITBUCKET_REPO_FULL_NAM
 INITIATOR="${BITBUCKET_STEP_TRIGGERER_UUID:-bitbucket-pipelines}"
 if [ "$DRY_RUN" != "1" ] && [ -n "${UPWIND_COMMENT_TOKEN:-}" ] && [ -n "${BITBUCKET_PR_ID:-}" ]; then
   DISPLAY=$(curl -fsSL -H "Authorization: Bearer ${UPWIND_COMMENT_TOKEN}" \
-    "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pullrequests/${BITBUCKET_PR_ID}" 2>/dev/null \
+    "${BB_API}/repositories/${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}/pullrequests/${BITBUCKET_PR_ID}" 2>/dev/null \
     | jq -r '.author.display_name // empty' || true)
   [ -n "$DISPLAY" ] && INITIATOR="$DISPLAY"
 fi
@@ -85,8 +105,7 @@ fi
 # container runs as root over a clone owned by another uid, so git needs
 # safe.directory before it will read it.
 if [ "$INITIATOR" = "${BITBUCKET_STEP_TRIGGERER_UUID:-bitbucket-pipelines}" ] && command -v git >/dev/null 2>&1; then
-  git config --global --add safe.directory '*' 2>/dev/null || true
-  AUTHOR=$(git log -1 --format=%an 2>/dev/null || true)
+  AUTHOR=$(git -c safe.directory="$PWD" log -1 --format=%an 2>/dev/null || true)
   [ -n "$AUTHOR" ] && INITIATOR="$AUTHOR"
 fi
 
@@ -104,13 +123,24 @@ SCAN_CMD=("$SHIFTLEFT" image
   --block-on="${BLOCK_ON}"
   --enforce-block-policy="${ENFORCE_BLOCK_POLICY}"
   --docker-pull="${DOCKER_PULL}"
+  --docker-user="${DOCKER_USER}"
+  --docker-password="${DOCKER_PASSWORD}"
+  --additional-registries="${ADDITIONAL_REGISTRIES}"
   --oci-client=docker
   "$@")
+# Only when asked for: older binaries reject unknown flags.
+if [ "$FAIL_ON_SCAN_ERROR" = "true" ]; then
+  SCAN_CMD+=(--fail-on-scan-error)
+fi
 
 if [ "$DRY_RUN" = "1" ]; then
   # Credentials stay out of the dry-run output.
   DRY_CMD="${SCAN_CMD[*]/--upwind-client-secret=${CLIENT_SECRET}/--upwind-client-secret=***}"
-  echo "DRY RUN: ${DRY_CMD/--upwind-client-id=${CLIENT_ID}/--upwind-client-id=***}"
+  DRY_CMD="${DRY_CMD/--upwind-client-id=${CLIENT_ID}/--upwind-client-id=***}"
+  if [ -n "$DOCKER_PASSWORD" ]; then
+    DRY_CMD="${DRY_CMD/--docker-password=${DOCKER_PASSWORD}/--docker-password=***}"
+  fi
+  echo "DRY RUN: ${DRY_CMD}"
   SCAN_EXIT=0
 else
   # ---- Scan (capture exit code so the comment still posts on block) ----
@@ -118,6 +148,11 @@ else
   if "${SCAN_CMD[@]}"; then SCAN_EXIT=0; else SCAN_EXIT=$?; fi
   ELAPSED=$(( $(date +%s) - SCAN_START ))
   if [ "$ELAPSED" -ge 60 ]; then SCAN_DURATION_HUMAN="$((ELAPSED/60))m $((ELAPSED%60))s"; else SCAN_DURATION_HUMAN="${ELAPSED}s"; fi
+  # Guard against the CLI's fail-open paths: an output file with no result
+  # means the scan did not complete. Fails the step only when
+  # UPWIND_FAIL_ON_SCAN_ERROR=true; the comment below still runs first.
+  CHECK_EXIT=0
+  bash "$CHECK_SCRIPT" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR" || CHECK_EXIT=$?
 fi
 
 # ---- Sticky PR comment (never fails the build) ----
@@ -132,4 +167,5 @@ else
   bash "$COMMENT_SCRIPT" || echo "Warning: failed to post Upwind PR comment"
 fi
 
-exit "$SCAN_EXIT"
+if [ "$SCAN_EXIT" -ne 0 ]; then exit "$SCAN_EXIT"; fi
+exit "${CHECK_EXIT:-0}"

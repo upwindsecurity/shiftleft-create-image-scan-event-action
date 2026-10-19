@@ -68,12 +68,23 @@ echo "$OUT" | grep -q 'would post Upwind PR comment'; check "pr+token: would pos
 
 # ---- knobs pass through ----
 run_pipe UPWIND_DOCKER_PULL=false UPWIND_BLOCK_ON=do_not_deploy \
-  UPWIND_ENFORCE_BLOCK_POLICY=true UPWIND_URI=upwind.dev
+  UPWIND_ENFORCE_BLOCK_POLICY=true UPWIND_URI=upwind.dev \
+  UPWIND_DOCKER_USER=reguser UPWIND_DOCKER_PASSWORD=regpass \
+  UPWIND_ADDITIONAL_REGISTRIES=reg1.io,reg2.io UPWIND_FAIL_ON_SCAN_ERROR=true
 check "knobs: exits 0" "$RC"
 echo "$OUT" | grep -q -- '--docker-pull=false'; check "knobs: docker-pull false" "$?"
 echo "$OUT" | grep -q -- '--block-on=do_not_deploy'; check "knobs: block-on" "$?"
 echo "$OUT" | grep -q -- '--enforce-block-policy=true'; check "knobs: enforce block policy" "$?"
 echo "$OUT" | grep -q -- '--upwind-uri=upwind.dev'; check "knobs: uri override" "$?"
+echo "$OUT" | grep -q -- '--docker-user=reguser'; check "knobs: docker user" "$?"
+echo "$OUT" | grep -q -- '--docker-password=\*\*\*'; check "knobs: docker password masked" "$?"
+if echo "$OUT" | grep -q 'regpass'; then check "knobs: no raw docker password" 1; else check "knobs: no raw docker password" 0; fi
+echo "$OUT" | grep -q -- '--additional-registries=reg1.io,reg2.io'; check "knobs: additional registries" "$?"
+echo "$OUT" | grep -q -- '--fail-on-scan-error'; check "knobs: fail-on-scan-error flag" "$?"
+
+# default: fail-on-scan-error must NOT be passed (older binaries reject unknown flags)
+run_pipe
+if echo "$OUT" | grep -q -- '--fail-on-scan-error'; then check "default: no fail-on-scan-error flag" 1; else check "default: no fail-on-scan-error flag" 0; fi
 
 # ---- tag pipeline: branch falls back to tag ----
 OUT=$(env "${BASE_ENV[@]/BITBUCKET_BRANCH=feature\/x/BITBUCKET_TAG=v9.9.9}" bash "$PIPE" 2>&1); RC=$?
@@ -81,6 +92,7 @@ check "tag: exits 0" "$RC"
 echo "$OUT" | grep -q -- '--branch v9.9.9'; check "tag: branch falls back to tag" "$?"
 
 # ---- initiator fallback: commit author on non-PR pipelines, else uuid ----
+SAFE_DIRS_BEFORE=$(git config --global --get-all safe.directory 2>/dev/null | wc -l | tr -d ' ')
 ABS_PIPE="$PWD/$PIPE"
 GITDIR=$(mktemp -d)
 git -C "$GITDIR" init -q
@@ -89,6 +101,8 @@ OUT=$(cd "$GITDIR" && env "${BASE_ENV[@]}" bash "$ABS_PIPE" 2>&1); RC=$?
 check "git author: exits 0" "$RC"
 echo "$OUT" | grep -q -- '--initiator=Test Author'; check "git author: non-pr initiator is commit author" "$?"
 rm -rf "$GITDIR"
+SAFE_DIRS_AFTER=$(git config --global --get-all safe.directory 2>/dev/null | wc -l | tr -d ' ')
+[ "$SAFE_DIRS_AFTER" = "${SAFE_DIRS_BEFORE:-0}" ]; check "git author: global git config untouched" "$?"
 
 NOGIT=$(mktemp -d)
 OUT=$(cd "$NOGIT" && env "${BASE_ENV[@]}" bash "$ABS_PIPE" 2>&1); RC=$?
@@ -105,6 +119,72 @@ rm -f "$TMPBIN"
 run_pipe UPWIND_SHIFTLEFT_PATH=/nonexistent/shiftleft
 [ "$RC" -ne 0 ]; check "shiftleft path missing: nonzero exit" "$?"
 echo "$OUT" | grep -q 'not an executable file'; check "shiftleft path missing: error message" "$?"
+
+# ---- integration: comment posts, then the step fails on block ----
+# Stub binary honours --output-json and exits STUB_EXIT; stub server serves the
+# PR-author lookup and the comments API. BB_API_BASE points both the pipe and
+# the comment script at the stub.
+WORKDIR=$(mktemp -d)
+STUB="$WORKDIR/shiftleft-stub"
+cat > "$STUB" <<'EOS'
+#!/usr/bin/env bash
+echo "STUB_ARGS: $*"
+for a in "$@"; do case "$a" in --output-json=*) cp "$STUB_FIXTURE" "${a#*=}";; esac; done
+exit "${STUB_EXIT:-0}"
+EOS
+chmod +x "$STUB"
+
+python3 - <<'PY' &
+import http.server, json
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if '/pullrequests/7/comments' in self.path:
+            body = {"values": []}
+        elif '/pullrequests/7' in self.path:
+            body = {"author": {"display_name": "Stub Author"}}
+        else:
+            self.send_response(404); self.end_headers(); return
+        self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
+        self.wfile.write(json.dumps(body).encode())
+    def do_POST(self):
+        self.send_response(201); self.send_header('Content-Type','application/json'); self.end_headers()
+        self.wfile.write(b'{"id": 7001}')
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', 8978), H).serve_forever()
+PY
+STUB_PID=$!
+sleep 1
+
+INTEG_ENV=(
+  UPWIND_CLIENT_ID=cid UPWIND_CLIENT_SECRET=csecret
+  UPWIND_DOCKER_IMAGE=myapp:abc123 UPWIND_SHIFTLEFT_PATH="$STUB"
+  UPWIND_COMMENT_SCRIPT="$PWD/scripts/upwind_bb_comment.sh"
+  UPWIND_CHECK_SCRIPT="$PWD/../scripts/check_scan_output.sh"
+  BB_API_BASE=http://127.0.0.1:8978
+  UPWIND_COMMENT_TOKEN=tok UPWIND_URI=upwind.dev
+  BITBUCKET_COMMIT=abcdef1234567890 BITBUCKET_BRANCH=feature/x
+  BITBUCKET_REPO_FULL_NAME=ws/repo BITBUCKET_WORKSPACE=ws
+  BITBUCKET_REPO_SLUG=repo BITBUCKET_BUILD_NUMBER=55
+  BITBUCKET_PR_ID=7 BITBUCKET_PR_DESTINATION_BRANCH=main
+)
+
+# blocked scan (exit 1): the comment still posts, the pipe still exits 1
+OUT=$(cd "$WORKDIR" && env "${INTEG_ENV[@]}" STUB_FIXTURE="$OLDPWD/tests/fixtures/single.json" STUB_EXIT=1 bash "$ABS_PIPE" 2>&1); RC=$?
+[ "$RC" -eq 1 ]; check "integ block: pipe exits 1" "$?"
+echo "$OUT" | grep -qi 'posting new.*comment'; check "integ block: comment posted before failing" "$?"
+echo "$OUT" | grep -q -- '--initiator=Stub Author'; check "integ block: initiator resolved via BB_API_BASE" "$?"
+
+# scan silently produced no result: fail-on-scan-error turns green into red
+OUT=$(cd "$WORKDIR" && env "${INTEG_ENV[@]}" STUB_FIXTURE="$OLDPWD/tests/fixtures/empty.json" STUB_EXIT=0 UPWIND_FAIL_ON_SCAN_ERROR=true bash "$ABS_PIPE" 2>&1); RC=$?
+[ "$RC" -ne 0 ]; check "integ no-result: exits nonzero with fail-on-scan-error" "$?"
+echo "$OUT" | grep -q 'no result'; check "integ no-result: explains why" "$?"
+
+# same silent-zero without the knob keeps the historical fail-open behavior
+OUT=$(cd "$WORKDIR" && env "${INTEG_ENV[@]}" STUB_FIXTURE="$OLDPWD/tests/fixtures/empty.json" STUB_EXIT=0 bash "$ABS_PIPE" 2>&1); RC=$?
+check "integ no-result default: exits 0 (fail-open preserved)" "$RC"
+
+kill $STUB_PID 2>/dev/null
+rm -rf "$WORKDIR"
 
 # ---- syntax check both scripts ----
 bash -n pipe/pipe.sh; check "pipe.sh: bash -n" "$?"
