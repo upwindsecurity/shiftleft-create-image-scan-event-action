@@ -12,6 +12,7 @@
     "Minor": 0,
     "Patch": 1
   },
+  "minimumAgentVersion": "3.232.0",
   "instanceNameFormat": "Upwind image scan $(image)",
   "inputs": [
     {
