@@ -1,0 +1,57 @@
+name: Bitbucket Pipe CI
+
+# scripts/check_scan_output.sh is shared with the GitHub action and baked
+# into the pipe image, so changes to it must run the pipe suite too.
+on:
+  pull_request:
+    paths: ['bitbucket/**', '.github/workflows/bitbucket-*.yml', 'scripts/check_scan_output.sh']
+  push:
+    branches: [main]
+    paths: ['bitbucket/**', '.github/workflows/bitbucket-*.yml', 'scripts/check_scan_output.sh']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bitbucket
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Comment script tests
+        run: bash tests/run_tests.sh
+
+      - name: Pipe tests
+        run: bash tests/run_pipe_tests.sh
+
+      - name: Build pipe image
+        working-directory: ${{ github.workspace }}
+        run: docker build -f bitbucket/Dockerfile -t pipe-under-test .
+
+      - name: Dry-run smoke test (inside the image)
+        run: |
+          docker run --rm \
+            -e UPWIND_PIPE_DRY_RUN=1 \
+            -e UPWIND_CLIENT_ID=cid \
+            -e UPWIND_CLIENT_SECRET=csecret \
+            -e UPWIND_DOCKER_IMAGE=myapp:1 \
+            -e BITBUCKET_COMMIT=abc123 \
+            -e BITBUCKET_REPO_FULL_NAME=ws/repo \
+            -e BITBUCKET_BUILD_NUMBER=1 \
+            pipe-under-test | tee /tmp/smoke.out
+          grep -q 'DRY RUN: ./shiftleft image' /tmp/smoke.out
+          grep -q -- '--source=BITBUCKET' /tmp/smoke.out
+
+      # The comment script runs under alpine/busybox inside the pipe image;
+      # prove the dry-run path there, not just on the ubuntu runner.
+      - name: Comment script dry-run (inside the image)
+        run: |
+          docker run --rm -v "$PWD/tests:/tests" --entrypoint bash \
+            -e UPWIND_BB_DRY_RUN=1 -e UPWIND_COMMENT_TOKEN=dummy \
+            -e OUTPUT_JSON=/tests/fixtures/single.json -e UPWIND_URI=upwind.dev \
+            -e SCAN_DURATION_HUMAN=38s -e BITBUCKET_WORKSPACE=ws \
+            -e BITBUCKET_REPO_SLUG=repo -e BITBUCKET_REPO_FULL_NAME=ws/repo \
+            -e BITBUCKET_PR_ID=7 -e BITBUCKET_COMMIT=abcdef1234567890 \
+            -e BITBUCKET_PR_DESTINATION_BRANCH=main \
+            pipe-under-test /usr/local/bin/upwind_bb_comment.sh | tee /tmp/comment.out
+          grep -qF '[//]: # (upwind-image-scan-report)' /tmp/comment.out
