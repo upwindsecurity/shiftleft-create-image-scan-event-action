@@ -87,8 +87,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/vsix"
+          # --root azure: manifest file paths (task/, images/) resolve
+          # relative to azure/, and the package layout must match the
+          # contribution's `properties.name: "task"`. Packaging from the
+          # repo root nests everything under azure/ and the Marketplace's
+          # deep validation then fails with "The task.json file was not
+          # found in contribution task".
           npx tfx-cli extension create \
-            --manifest-globs "$MANIFEST" \
+            --root azure \
+            --manifest-globs "$(basename "$MANIFEST")" \
             --output-path "$RUNNER_TEMP/vsix" \
             --no-prompt
           ls "$RUNNER_TEMP/vsix"/*.vsix
