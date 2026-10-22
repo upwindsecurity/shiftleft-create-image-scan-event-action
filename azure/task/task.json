@@ -4,7 +4,7 @@
   "name": "UpwindImageScan",
   "friendlyName": "Upwind Image Scan",
   "description": "Scan a container image with Upwind ShiftLeft and comment the results on the pull request",
-  "helpMarkDown": "Scans a container image for vulnerabilities, secrets and malware with Upwind ShiftLeft. On pull request builds the results are posted as a sticky comment thread. Grant the project build service identity 'Contribute to pull requests' on the repository to enable the comment.",
+  "helpMarkDown": "Scans a container image for vulnerabilities, secrets and malware with Upwind ShiftLeft. Set postComment to post the results as a sticky comment thread on pull request builds; grant the project build service identity 'Contribute to pull requests' on the repository to enable it.",
   "category": "Build",
   "author": "Upwind",
   "version": {
@@ -13,24 +13,24 @@
     "Patch": 1
   },
   "minimumAgentVersion": "3.232.0",
-  "instanceNameFormat": "Upwind image scan $(image)",
+  "instanceNameFormat": "Upwind image scan $(dockerImage)",
   "inputs": [
     {
-      "name": "image",
+      "name": "dockerImage",
       "type": "string",
-      "label": "Image",
+      "label": "Docker image",
       "required": true,
       "helpMarkDown": "Image to scan, for example myapp:$(Build.SourceVersion)."
     },
     {
-      "name": "clientId",
+      "name": "upwindClientId",
       "type": "string",
       "label": "Upwind client ID",
       "required": true,
       "helpMarkDown": "Upwind ShiftLeft credential client ID."
     },
     {
-      "name": "clientSecret",
+      "name": "upwindClientSecret",
       "type": "string",
       "label": "Upwind client secret",
       "required": true,
@@ -43,6 +43,55 @@
       "defaultValue": "upwind.io",
       "required": false,
       "helpMarkDown": "Upwind domain, upwind.io (default) or upwind.dev."
+    },
+    {
+      "name": "dockerUser",
+      "type": "string",
+      "label": "Registry user",
+      "required": false,
+      "helpMarkDown": "User to authenticate to the image registry, for images pulled from a private registry."
+    },
+    {
+      "name": "dockerPassword",
+      "type": "string",
+      "label": "Registry password",
+      "required": false,
+      "helpMarkDown": "Password or token to authenticate to the image registry. Pass a secret pipeline variable, for example $(REGISTRY_PASSWORD)."
+    },
+    {
+      "name": "dockerPull",
+      "type": "boolean",
+      "label": "Pull image",
+      "defaultValue": true,
+      "required": false,
+      "helpMarkDown": "Pull the image before scanning. Disable when the image was built earlier in this pipeline."
+    },
+    {
+      "name": "ociClient",
+      "type": "pickList",
+      "label": "OCI client",
+      "defaultValue": "docker",
+      "required": false,
+      "options": {
+        "docker": "docker",
+        "podman": "podman",
+        "skopeo": "skopeo"
+      },
+      "helpMarkDown": "Client used to pull the image: docker (default), podman or skopeo."
+    },
+    {
+      "name": "additionalRegistries",
+      "type": "string",
+      "label": "Additional registries",
+      "required": false,
+      "helpMarkDown": "Comma-separated list of additional registries to associate with the scanned image."
+    },
+    {
+      "name": "mainBranch",
+      "type": "string",
+      "label": "Main branch",
+      "required": false,
+      "helpMarkDown": "Base branch to diff against. Introduced and resolved CVEs are computed against the latest scanned image of this branch. Defaults to the pull request target branch on pull request builds; set it to override, or to diff non-PR builds."
     },
     {
       "name": "blockOn",
@@ -74,12 +123,12 @@
       "helpMarkDown": "Fail the task when the scan cannot complete. Without it the scanner exits 0 on most scan failures, so a blocking build can pass on an image that was never scanned."
     },
     {
-      "name": "dockerPull",
+      "name": "postComment",
       "type": "boolean",
-      "label": "Pull image",
-      "defaultValue": true,
+      "label": "Post PR comment",
+      "defaultValue": false,
       "required": false,
-      "helpMarkDown": "Pull the image before scanning. Disable when the image was built earlier in this pipeline."
+      "helpMarkDown": "Post the scan results as a comment thread on pull request builds. Requires the one-time \"Contribute to pull requests\" grant for the project build service identity."
     },
     {
       "name": "agentChannel",
@@ -88,14 +137,6 @@
       "defaultValue": "stable",
       "required": false,
       "helpMarkDown": "ShiftLeft release channel to download."
-    },
-    {
-      "name": "postComment",
-      "type": "boolean",
-      "label": "Post PR comment",
-      "defaultValue": true,
-      "required": false,
-      "helpMarkDown": "Post the scan results as a comment thread on pull request builds."
     }
   ],
   "execution": {

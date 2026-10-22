@@ -2,10 +2,10 @@ name: Azure Task CI
 
 on:
   pull_request:
-    paths: ['azure/**', '.github/workflows/azure-*.yml']
+    paths: ['azure/**', '.github/workflows/azure-*.yml', 'scripts/check_scan_output.sh']
   push:
     branches: [main]
-    paths: ['azure/**', '.github/workflows/azure-*.yml']
+    paths: ['azure/**', '.github/workflows/azure-*.yml', 'scripts/check_scan_output.sh']
 
 permissions:
   contents: read

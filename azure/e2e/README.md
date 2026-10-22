@@ -54,9 +54,10 @@ steps:
   - task: UpwindImageScan@0
     displayName: Upwind image scan
     inputs:
-      image: upwind-e2e:$(Build.SourceVersion)
-      clientId: $(UPWIND_CLIENT_ID)
-      clientSecret: $(UPWIND_CLIENT_SECRET)
+      dockerImage: upwind-e2e:$(Build.SourceVersion)
+      upwindClientId: $(UPWIND_CLIENT_ID)
+      upwindClientSecret: $(UPWIND_CLIENT_SECRET)
+      postComment: true
       upwindUri: upwind.dev
       dockerPull: false
 ```

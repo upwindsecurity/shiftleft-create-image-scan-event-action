@@ -19,6 +19,10 @@
 #   OUTPUT_JSON           path to `shiftleft image --output-json`
 #   UPWIND_URI            e.g. upwind.io / upwind.dev (for the Console link)
 #   SCAN_DURATION_HUMAN   optional, e.g. "38s" / "1m 4s"
+#   COMMIT_SHA            optional, the commit the scan is attributed to
+#                         (default BUILD_SOURCEVERSION)
+#   MAIN_BRANCH           optional, the branch the scan is diffed against
+#                         (default SYSTEM_PULLREQUEST_TARGETBRANCH)
 #   SYSTEM_TEAMFOUNDATIONCOLLECTIONURI, SYSTEM_TEAMPROJECT,
 #   BUILD_REPOSITORY_NAME, SYSTEM_PULLREQUEST_PULLREQUESTID,
 #   BUILD_SOURCEVERSION, SYSTEM_PULLREQUEST_TARGETBRANCH
@@ -38,8 +42,8 @@ MAX_ROWS=60
 # ADO rejects comments over 150,000 chars; keep a ~10% margin.
 ADO_SIZE_CAP=135000
 
-MAIN_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
-COMMIT_SHA="${BUILD_SOURCEVERSION:-}"
+MAIN_BRANCH="${MAIN_BRANCH-${SYSTEM_PULLREQUEST_TARGETBRANCH:-}}"
+COMMIT_SHA="${COMMIT_SHA:-${BUILD_SOURCEVERSION:-}}"
 COLLECTION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI:-}"
 COLLECTION="${COLLECTION%/}"
 # Project / repository names may contain spaces; encode them for URLs.

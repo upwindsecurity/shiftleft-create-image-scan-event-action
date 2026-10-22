@@ -30,23 +30,25 @@ updates one comment thread per PR.
        displayName: Build image
      - task: UpwindImageScan@0
        inputs:
-         image: myapp:$(Build.SourceVersion)
-         clientId: $(UPWIND_CLIENT_ID)
-         clientSecret: $(UPWIND_CLIENT_SECRET)
+         dockerImage: myapp:$(Build.SourceVersion)
+         upwindClientId: $(UPWIND_CLIENT_ID)
+         upwindClientSecret: $(UPWIND_CLIENT_SECRET)
          dockerPull: false
+         postComment: true
    ```
 
    `dockerPull: false` tells the task the image already exists on the agent
    (built in an earlier step). For an image that lives in a registry, leave
-   `dockerPull` at its default (`true`) and set `image` to the registry path;
-   the agent must be logged in to that registry.
+   `dockerPull` at its default (`true`) and set `dockerImage` to the registry
+   path; for a private registry pass `dockerUser` / `dockerPassword` (or log
+   the agent in to the registry in an earlier step).
 
    Choose the agent pool as you normally would (for example
    `pool: {vmImage: ubuntu-latest}`). The agent needs `bash`, `curl`, `jq`
    and `docker`; Microsoft-hosted Ubuntu images include all four.
 
 4. **Grant the build service permission to comment on pull requests (one
-   time per repository).** See
+   time per repository)** when `postComment: true`. See
    [Allow the task to comment on pull requests](#allow-the-task-to-comment-on-pull-requests).
    Without it the scan still runs and reports to the Console; only the PR
    comment is skipped.
@@ -65,16 +67,49 @@ release channel.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `image` | yes | | The image to scan, e.g. `myapp:$(Build.SourceVersion)` |
-| `clientId` | yes | | Upwind sensor credential id |
-| `clientSecret` | yes | | Upwind sensor credential secret; pass a secret pipeline variable such as `$(UPWIND_CLIENT_SECRET)` |
+| `dockerImage` | yes | | The image to scan, e.g. `myapp:$(Build.SourceVersion)` |
+| `upwindClientId` | yes | | Upwind sensor credential id |
+| `upwindClientSecret` | yes | | Upwind sensor credential secret; pass a secret pipeline variable such as `$(UPWIND_CLIENT_SECRET)` |
 | `upwindUri` | no | `upwind.io` | Upwind domain: `upwind.io` or `upwind.dev` |
+| `dockerUser` | no | | Registry user for pulling from a private registry |
+| `dockerPassword` | no | | Registry password/token for pulling from a private registry; pass a secret pipeline variable |
+| `dockerPull` | no | `true` | `false` when the image was built earlier in the same pipeline (default: pull from the registry) |
+| `ociClient` | no | `docker` | Client used to pull the image: `docker`, `podman` or `skopeo` |
+| `additionalRegistries` | no | | Comma-separated additional registries to associate with the image |
+| `mainBranch` | no | PR target branch | Branch to diff against: introduced/resolved CVEs are computed vs the latest scanned image of this branch. PR runs default to the PR target branch; set it to override, or to diff non-PR runs |
 | `blockOn` | no | never block | Fail the task on scan recommendation: `do_not_deploy` or `deploy_with_caution` |
 | `enforceBlockPolicy` | no | `false` | `true` to fail the task when the scan violates your organization's Upwind PR-block policy |
 | `failOnScanError` | no | `false` | `true` to fail the task when the scan cannot complete or produces no result; without it the task only warns, so a blocking build can pass on an unscanned image |
-| `dockerPull` | no | `true` | `false` when the image was built earlier in the same pipeline (default: pull from the registry) |
+| `postComment` | no | `false` | `true` to post the report as a PR comment thread on pull-request runs |
 | `agentChannel` | no | `stable` | Release channel of the `shiftleft` binary |
-| `postComment` | no | `true` | `false` to never post the PR comment |
+
+The scan is attributed to the PR head commit (`System.PullRequest.SourceCommitId`)
+on pull-request runs, not the merge commit Azure Pipelines builds, and to
+`Build.SourceVersion` otherwise. The job name (`System.JobDisplayName`) is
+reported with the pipeline name and run.
+
+### Same inputs on every CI
+
+The inputs mean the same thing in every Upwind CI integration; only the
+spelling follows each platform's convention.
+
+| Azure Pipelines task | GitHub Action | Bitbucket pipe variable |
+|---|---|---|
+| `dockerImage` | `docker_image` | `UPWIND_DOCKER_IMAGE` |
+| `upwindClientId` | `upwind_client_id` | `UPWIND_CLIENT_ID` |
+| `upwindClientSecret` | `upwind_client_secret` | `UPWIND_CLIENT_SECRET` |
+| `upwindUri` | `upwind_uri` | `UPWIND_URI` |
+| `dockerUser` | `docker_user` | `UPWIND_DOCKER_USER` |
+| `dockerPassword` | `docker_password` | `UPWIND_DOCKER_PASSWORD` |
+| `dockerPull` | `pull_image` | `UPWIND_DOCKER_PULL` |
+| `ociClient` | `oci_client` | - (always `docker`) |
+| `additionalRegistries` | `additional_registries` | `UPWIND_ADDITIONAL_REGISTRIES` |
+| `mainBranch` | `main_branch` | - (PR destination branch) |
+| `blockOn` | `block_on` | `UPWIND_BLOCK_ON` |
+| `enforceBlockPolicy` | `enforce_block_policy` | `UPWIND_ENFORCE_BLOCK_POLICY` |
+| `failOnScanError` | `fail_on_scan_error` | `UPWIND_FAIL_ON_SCAN_ERROR` |
+| `postComment` | `add_comment` | - (posts when `UPWIND_COMMENT_TOKEN` is set) |
+| `agentChannel` | - | `UPWIND_AGENT_CHANNEL` |
 
 ## Azure Repos only (PR comment and PR context)
 
@@ -124,10 +159,11 @@ exits.
 ```yaml
 - task: UpwindImageScan@0
   inputs:
-    image: myapp:$(Build.SourceVersion)
-    clientId: $(UPWIND_CLIENT_ID)
-    clientSecret: $(UPWIND_CLIENT_SECRET)
+    dockerImage: myapp:$(Build.SourceVersion)
+    upwindClientId: $(UPWIND_CLIENT_ID)
+    upwindClientSecret: $(UPWIND_CLIENT_SECRET)
     dockerPull: false
+    postComment: true
     blockOn: do_not_deploy
 ```
 
@@ -145,6 +181,9 @@ pull-request run, so the comment is posted.
 - **`Upwind image scan produced no result`** - the scan failed or its results
   were not ready within the wait window. The task fails when
   `failOnScanError: true`, and otherwise continues with a warning.
+- **`Info: postComment is not enabled; skipping Upwind PR comment`** - set
+  `postComment: true` to post the report on pull requests (off by default,
+  like the other Upwind CI integrations).
 - **`Info: not a pull-request run; skipping Upwind PR comment`** - comments
   only post on runs queued by a Build Validation policy. Manual and
   CI-trigger runs scan and report to the Console only (and establish the
@@ -154,7 +193,7 @@ pull-request run, so the comment is posted.
   requests**; see
   [Allow the task to comment on pull requests](#allow-the-task-to-comment-on-pull-requests).
 - **`No job access token available; the Upwind PR comment will be skipped`**
-  - the pipeline has no job access token. This happens when the organization
+  (only with `postComment: true`) - the pipeline has no job access token. This happens when the organization
   or project restricts job authorization, or the build identity is scoped
   out of the repository. Fix the repository grant above and check Project
   settings > Pipelines > Settings.

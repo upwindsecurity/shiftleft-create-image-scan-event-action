@@ -18,13 +18,21 @@
 #                                         cannot complete (default false)
 #   UPWIND_DOCKER_PULL          optional  false when the image was built in
 #                                         this pipeline (default true)
+#   UPWIND_DOCKER_USER          optional  registry user, for images pulled from
+#   UPWIND_DOCKER_PASSWORD      optional  a private registry
+#   UPWIND_OCI_CLIENT           optional  docker (default) | podman | skopeo
+#   UPWIND_ADDITIONAL_REGISTRIES optional comma-separated registries to also
+#                                         associate with the image
+#   UPWIND_MAIN_BRANCH          optional  branch to diff against; defaults to
+#                                         the PR target branch on PR runs
 #   UPWIND_AGENT_CHANNEL        optional  shiftleft release channel (stable)
-#   UPWIND_POST_COMMENT         optional  false to never post the PR comment
+#   UPWIND_POST_COMMENT         optional  true to post the PR comment (default false)
 # Azure Pipelines predefined variables used:
 #   BUILD_SOURCEVERSION, BUILD_SOURCEBRANCH, BUILD_REPOSITORY_URI,
 #   BUILD_REPOSITORY_NAME, BUILD_REPOSITORY_PROVIDER, BUILD_BUILDID, BUILD_DEFINITIONNAME,
 #   BUILD_REQUESTEDFOR, SYSTEM_TEAMFOUNDATIONCOLLECTIONURI, SYSTEM_TEAMPROJECT,
-#   SYSTEM_PULLREQUEST_SOURCEBRANCH, SYSTEM_PULLREQUEST_TARGETBRANCH,
+#   SYSTEM_JOBDISPLAYNAME, SYSTEM_PULLREQUEST_SOURCEBRANCH,
+#   SYSTEM_PULLREQUEST_SOURCECOMMITID, SYSTEM_PULLREQUEST_TARGETBRANCH,
 #   SYSTEM_PULLREQUEST_PULLREQUESTID
 # Test seams:
 #   UPWIND_PIPE_DRY_RUN=1   print the resolved scan command and the comment
@@ -49,8 +57,12 @@ BLOCK_ON="${UPWIND_BLOCK_ON:-}"                     # do_not_deploy | deploy_wit
 ENFORCE_BLOCK_POLICY="${UPWIND_ENFORCE_BLOCK_POLICY:-false}"
 FAIL_ON_SCAN_ERROR="${UPWIND_FAIL_ON_SCAN_ERROR:-false}"
 DOCKER_PULL="${UPWIND_DOCKER_PULL:-true}"           # false when the image is built in this pipeline
+DOCKER_USER="${UPWIND_DOCKER_USER:-}"
+DOCKER_PASSWORD="${UPWIND_DOCKER_PASSWORD:-}"
+OCI_CLIENT="${UPWIND_OCI_CLIENT:-docker}"
+ADDITIONAL_REGISTRIES="${UPWIND_ADDITIONAL_REGISTRIES:-}"
 AGENT_CHANNEL="${UPWIND_AGENT_CHANNEL:-stable}"
-POST_COMMENT="${UPWIND_POST_COMMENT:-true}"
+POST_COMMENT="${UPWIND_POST_COMMENT:-false}"
 OUTPUT_JSON="upwind-shift-left.json"
 
 SHIFTLEFT="${UPWIND_SHIFTLEFT_PATH:-./shiftleft}"
@@ -101,18 +113,35 @@ fi
 BRANCH="${BRANCH#refs/heads/}"
 BRANCH="${BRANCH#refs/tags/}"
 
+# On PR runs BUILD_SOURCEVERSION is the synthetic merge commit, which exists
+# nowhere in the repository history; attribute the scan to the PR head commit
+# instead, same as the Bitbucket pipe and the GitLab component.
+COMMIT_SHA="${BUILD_SOURCEVERSION:-}"
+if [ "$IS_PR" = "true" ] && [ -n "${SYSTEM_PULLREQUEST_SOURCECOMMITID:-}" ]; then
+  COMMIT_SHA="$SYSTEM_PULLREQUEST_SOURCECOMMITID"
+fi
+
+# Diff base: the mainBranch input wins; PR runs default to the PR target branch.
+MAIN_BRANCH="${UPWIND_MAIN_BRANCH:-}"
+if [ -z "$MAIN_BRANCH" ] && [ "$IS_PR" = "true" ]; then
+  MAIN_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
+fi
+MAIN_BRANCH="${MAIN_BRANCH#refs/heads/}"
+
 # BUILD_REPOSITORY_URI is the clone URL with the org as userinfo
 # (https://org@dev.azure.com/...); report the canonical form instead.
 REPOSITORY_URL=$(printf '%s' "${BUILD_REPOSITORY_URI:-}" | sed 's#^\(https\{0,1\}://\)[^/@]*@#\1#')
 
 set --
-if [ "$IS_PR" = "true" ]; then
-  MAIN_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
-  set -- "$@" --main-branch="${MAIN_BRANCH#refs/heads/}"
-  if [ "$IS_ADO_REPO" = "true" ]; then
-    set -- "$@" --pr-id="${SYSTEM_PULLREQUEST_PULLREQUESTID}"
-    set -- "$@" --pr-link="${ADO_BASE}/_git/${REPO_NAME_ENC}/pullrequest/${SYSTEM_PULLREQUEST_PULLREQUESTID}"
-  fi
+if [ -n "$MAIN_BRANCH" ]; then
+  set -- "$@" --main-branch="${MAIN_BRANCH}"
+fi
+if [ "$IS_PR" = "true" ] && [ "$IS_ADO_REPO" = "true" ]; then
+  set -- "$@" --pr-id="${SYSTEM_PULLREQUEST_PULLREQUESTID}"
+  set -- "$@" --pr-link="${ADO_BASE}/_git/${REPO_NAME_ENC}/pullrequest/${SYSTEM_PULLREQUEST_PULLREQUESTID}"
+fi
+if [ -n "${SYSTEM_JOBDISPLAYNAME:-}" ]; then
+  set -- "$@" --job-name="${SYSTEM_JOBDISPLAYNAME}"
 fi
 set -- "$@" --pipeline-run-id="${BUILD_BUILDID:-}"
 set -- "$@" --pipeline-run-link="${ADO_BASE}/_build/results?buildId=${BUILD_BUILDID:-}"
@@ -125,14 +154,17 @@ SCAN_CMD=("$SHIFTLEFT" image
   --upwind-client-id="${CLIENT_ID}"
   --upwind-client-secret="${CLIENT_SECRET}"
   --docker-image "${DOCKER_IMAGE}"
-  --commit-sha "${BUILD_SOURCEVERSION:-}"
+  --commit-sha "${COMMIT_SHA}"
   --branch "${BRANCH}"
   --repository "${REPOSITORY_URL}"
   --output-json="${OUTPUT_JSON}"
   --block-on="${BLOCK_ON}"
   --enforce-block-policy="${ENFORCE_BLOCK_POLICY}"
   --docker-pull="${DOCKER_PULL}"
-  --oci-client=docker
+  --docker-user="${DOCKER_USER}"
+  --docker-password="${DOCKER_PASSWORD}"
+  --additional-registries="${ADDITIONAL_REGISTRIES}"
+  --oci-client="${OCI_CLIENT}"
   "$@")
 # Only when asked for: older binaries reject unknown flags.
 if [ "$FAIL_ON_SCAN_ERROR" = "true" ]; then
@@ -142,7 +174,11 @@ fi
 if [ "$DRY_RUN" = "1" ]; then
   # Credentials stay out of the dry-run output.
   DRY_CMD="${SCAN_CMD[*]/--upwind-client-secret=${CLIENT_SECRET}/--upwind-client-secret=***}"
-  echo "DRY RUN: ${DRY_CMD/--upwind-client-id=${CLIENT_ID}/--upwind-client-id=***}"
+  DRY_CMD="${DRY_CMD/--upwind-client-id=${CLIENT_ID}/--upwind-client-id=***}"
+  if [ -n "$DOCKER_PASSWORD" ]; then
+    DRY_CMD="${DRY_CMD/--docker-password=${DOCKER_PASSWORD}/--docker-password=***}"
+  fi
+  echo "DRY RUN: ${DRY_CMD}"
   SCAN_EXIT=0
 else
   # ---- Scan (capture exit code so the comment still posts on block) ----
@@ -155,12 +191,12 @@ else
   # UPWIND_FAIL_ON_SCAN_ERROR=true (a missing file always fails); the
   # comment below still runs first.
   CHECK_EXIT=0
-  bash "$CHECK_SCRIPT" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR" || CHECK_EXIT=$?
+  UPWIND_LOG_FORMAT=azure bash "$CHECK_SCRIPT" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR" || CHECK_EXIT=$?
 fi
 
 # ---- Sticky PR comment (never fails the build) ----
-if [ "$POST_COMMENT" = "false" ]; then
-  echo "Info: UPWIND_POST_COMMENT=false; skipping Upwind PR comment"
+if [ "$POST_COMMENT" != "true" ]; then
+  echo "Info: postComment is not enabled; skipping Upwind PR comment"
 elif [ "$IS_PR" != "true" ]; then
   echo "Info: not a pull-request run; skipping Upwind PR comment"
 elif [ "$IS_ADO_REPO" != "true" ]; then
@@ -170,7 +206,7 @@ elif [ -z "${UPWIND_COMMENT_TOKEN:-}" ]; then
 elif [ "$DRY_RUN" = "1" ]; then
   echo "DRY RUN: would post Upwind PR comment via ${COMMENT_SCRIPT}"
 else
-  export UPWIND_COMMENT_TOKEN OUTPUT_JSON UPWIND_URI SCAN_DURATION_HUMAN
+  export UPWIND_COMMENT_TOKEN OUTPUT_JSON UPWIND_URI SCAN_DURATION_HUMAN COMMIT_SHA MAIN_BRANCH
   bash "$COMMENT_SCRIPT" || echo "Warning: failed to post Upwind PR comment"
 fi
 

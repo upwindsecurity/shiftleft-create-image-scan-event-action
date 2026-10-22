@@ -37,6 +37,8 @@ PR_ENV=(
   SYSTEM_PULLREQUEST_SOURCEBRANCH=refs/heads/feature/x
   SYSTEM_PULLREQUEST_TARGETBRANCH=refs/heads/main
   SYSTEM_PULLREQUEST_PULLREQUESTID=9
+  SYSTEM_PULLREQUEST_SOURCECOMMITID=headsha1234567
+  UPWIND_POST_COMMENT=true
 )
 
 run_scan() { # extra env as args -> OUT, RC
@@ -77,7 +79,7 @@ has '--pipeline-run-link=https://dev.azure.com/testorg/proj/_build/results?build
 for f in --pr-id --pr-link --main-branch; do
   if has "$f"; then check "non-pr: no $f" 1; else check "non-pr: no $f" 0; fi
 done
-has 'not a pull-request run; skipping Upwind PR comment'; check "non-pr: comment skipped" "$?"
+has 'postComment is not enabled; skipping Upwind PR comment'; check "non-pr: comment skipped (off by default)" "$?"
 has '--docker-pull=true'; check "non-pr: docker-pull defaults true" "$?"
 has '--oci-client=docker'; check "non-pr: oci client docker" "$?"
 has '--upwind-uri=upwind.io'; check "non-pr: uri defaults upwind.io" "$?"
@@ -85,6 +87,9 @@ has '--enforce-block-policy=false'; check "non-pr: enforce block policy defaults
 has '--upwind-client-secret=***'; check "non-pr: secret masked" "$?"
 has '--upwind-client-id=***'; check "non-pr: client id masked" "$?"
 if echo "$OUT" | grep -qE 'csecret|=cid( |$)'; then check "non-pr: no raw credentials in output" 1; else check "non-pr: no raw credentials in output" 0; fi
+
+run_scan UPWIND_POST_COMMENT=true UPWIND_COMMENT_TOKEN=tok
+has 'not a pull-request run; skipping Upwind PR comment'; check "non-pr with postComment: comment skipped" "$?"
 
 # ---- initiator fallback when requestedFor is absent ----
 OUT=$(env "${BASE_ENV[@]}" BUILD_REQUESTEDFOR= bash "$SCAN" 2>&1); RC=$?
@@ -117,8 +122,48 @@ has 'via /x/custom.sh'; check "pr+token: UPWIND_COMMENT_SCRIPT override" "$?"
 
 run_scan "${PR_ENV[@]}" UPWIND_COMMENT_TOKEN=tok UPWIND_POST_COMMENT=false
 check "post-comment=false: exits 0" "$RC"
-has 'UPWIND_POST_COMMENT=false; skipping Upwind PR comment'; check "post-comment=false: comment skipped" "$?"
+has 'postComment is not enabled; skipping Upwind PR comment'; check "post-comment=false: comment skipped" "$?"
 if has 'would post'; then check "post-comment=false: no post even with token+PR" 1; else check "post-comment=false: no post even with token+PR" 0; fi
+
+run_scan "${PR_ENV[@]}" UPWIND_COMMENT_TOKEN=tok UPWIND_POST_COMMENT=
+has 'postComment is not enabled; skipping Upwind PR comment'; check "post-comment unset: defaults to off, like the other CIs" "$?"
+if has 'would post'; then check "post-comment unset: no post" 1; else check "post-comment unset: no post" 0; fi
+
+# ---- commit sha: PR head commit, not the synthetic merge commit ----
+run_scan "${PR_ENV[@]}"
+has '--commit-sha headsha1234567 '; check "pr sha: PR source commit is reported" "$?"
+if has 'abcdef1234567890'; then check "pr sha: merge commit (BUILD_SOURCEVERSION) not reported" 1; else check "pr sha: merge commit (BUILD_SOURCEVERSION) not reported" 0; fi
+run_scan "${PR_ENV[@]}" SYSTEM_PULLREQUEST_SOURCECOMMITID=
+has '--commit-sha abcdef1234567890 '; check "pr sha: falls back to BUILD_SOURCEVERSION when the source commit is unknown" "$?"
+run_scan SYSTEM_PULLREQUEST_SOURCECOMMITID=headsha1234567
+has '--commit-sha abcdef1234567890 '; check "non-pr sha: BUILD_SOURCEVERSION" "$?"
+
+# ---- main branch: input overrides, PR target branch is the default ----
+run_scan "${PR_ENV[@]}" UPWIND_MAIN_BRANCH=refs/heads/develop
+has '--main-branch=develop'; check "main branch: input overrides PR target (refs/heads/ stripped)" "$?"
+if has '--main-branch=main'; then check "main branch: PR target not used when overridden" 1; else check "main branch: PR target not used when overridden" 0; fi
+run_scan UPWIND_MAIN_BRANCH=main
+has '--main-branch=main'; check "main branch: input applies on non-PR runs" "$?"
+if has '--pr-id'; then check "main branch: non-PR run still has no pr id" 1; else check "main branch: non-PR run still has no pr id" 0; fi
+
+# ---- job name ----
+run_scan SYSTEM_JOBDISPLAYNAME='Build and scan'
+has '--job-name=Build and scan'; check "job name: from System.JobDisplayName" "$?"
+run_scan
+if has '--job-name'; then check "job name: absent when System.JobDisplayName is unset" 1; else check "job name: absent when System.JobDisplayName is unset" 0; fi
+
+# ---- registry inputs ----
+run_scan
+has '--docker-user= '; check "registry: docker user empty by default" "$?"
+has '--additional-registries= '; check "registry: additional registries empty by default" "$?"
+run_scan UPWIND_DOCKER_USER=reguser UPWIND_DOCKER_PASSWORD=regpass \
+  UPWIND_ADDITIONAL_REGISTRIES=a.io,b.io UPWIND_OCI_CLIENT=podman
+check "registry: exits 0" "$RC"
+has '--docker-user=reguser'; check "registry: docker user" "$?"
+has '--docker-password=***'; check "registry: docker password masked" "$?"
+if has 'regpass'; then check "registry: raw docker password not printed" 1; else check "registry: raw docker password not printed" 0; fi
+has '--additional-registries=a.io,b.io'; check "registry: additional registries" "$?"
+has '--oci-client=podman'; check "registry: oci client" "$?"
 
 # ---- knobs pass through ----
 run_scan UPWIND_DOCKER_PULL=false UPWIND_BLOCK_ON=do_not_deploy \
@@ -180,7 +225,7 @@ exit "${STUB_SCAN_EXIT:-0}"
 STUB
 cat > "$TMP/stub_comment.sh" <<'STUB'
 #!/bin/bash
-echo "COMMENT_RAN token=${UPWIND_COMMENT_TOKEN:-} json=${OUTPUT_JSON:-} uri=${UPWIND_URI:-} dur=${SCAN_DURATION_HUMAN:-}" >> "$STUB_LOG"
+echo "COMMENT_RAN token=${UPWIND_COMMENT_TOKEN:-} json=${OUTPUT_JSON:-} uri=${UPWIND_URI:-} dur=${SCAN_DURATION_HUMAN:-} sha=${COMMIT_SHA:-} main=${MAIN_BRANCH:-}" >> "$STUB_LOG"
 exit "${STUB_COMMENT_EXIT:-0}"
 STUB
 chmod +x "$TMP/stub_shiftleft.sh"
@@ -196,6 +241,7 @@ run_live() { # extra env as args -> RC, LOG (comment log), OUT
 run_live "${PR_ENV[@]}" UPWIND_COMMENT_TOKEN=tok STUB_SCAN_EXIT=0
 check "live ok: exits 0" "$RC"
 echo "$LOG" | grep -q 'COMMENT_RAN token=tok json=upwind-shift-left.json uri=upwind.io dur=[0-9]'; check "live ok: comment script gets exported env" "$?"
+echo "$LOG" | grep -q 'sha=headsha1234567 main=main$'; check "live ok: comment script gets the PR head sha and main branch" "$?"
 
 run_live "${PR_ENV[@]}" UPWIND_COMMENT_TOKEN=tok STUB_SCAN_EXIT=3
 [ "$RC" -eq 3 ]; check "live block: exit code is the scan's exit code" "$?"
@@ -225,9 +271,12 @@ echo "$OUT" | grep -q 'Image scan completed'; check "guard result present: compl
 run_live STUB_SCAN_EXIT=0 STUB_EMPTY_RESULT=1
 [ "$RC" -eq 0 ]; check "guard no result, flag unset: exit 0" "$?"
 echo "$OUT" | grep -q 'Continuing because fail_on_scan_error is not set'; check "guard no result, flag unset: warning printed" "$?"
+echo "$OUT" | grep -qF '##vso[task.logissue type=warning]Upwind image scan produced no result'; check "guard no result: warning is an Azure logging command" "$?"
+if echo "$OUT" | grep -qF '::warning::'; then check "guard no result: no GitHub annotation syntax" 1; else check "guard no result: no GitHub annotation syntax" 0; fi
 
 run_live STUB_SCAN_EXIT=0 STUB_EMPTY_RESULT=1 UPWIND_FAIL_ON_SCAN_ERROR=true
 [ "$RC" -eq 1 ]; check "guard no result, flag true: exit 1" "$?"
+echo "$OUT" | grep -qF '##vso[task.logissue type=error]Upwind image scan produced no result'; check "guard no result, flag true: error is an Azure logging command" "$?"
 
 run_live STUB_SCAN_EXIT=0 STUB_NO_OUTPUT=1
 [ "$RC" -ne 0 ]; check "guard missing output file: nonzero even without the flag" "$?"

@@ -33,32 +33,38 @@ function fail(message) {
 }
 
 const required = [
-  ['image', 'INPUT_IMAGE'],
-  ['clientId', 'INPUT_CLIENTID'],
-  ['clientSecret', 'INPUT_CLIENTSECRET'],
+  ['dockerImage', 'INPUT_DOCKERIMAGE'],
+  ['upwindClientId', 'INPUT_UPWINDCLIENTID'],
+  ['upwindClientSecret', 'INPUT_UPWINDCLIENTSECRET'],
 ];
 for (const [name, variable] of required) {
   if (str(variable, '') === '') fail('Input "' + name + '" is required');
 }
 
+const postComment = bool('INPUT_POSTCOMMENT', 'false');
 const token = env.ENDPOINT_AUTH_PARAMETER_SYSTEMVSSCONNECTION_ACCESSTOKEN || env.SYSTEM_ACCESSTOKEN || '';
-// Only PR runs post a comment, so only they need the token; stay silent otherwise.
-if (token === '' && str('SYSTEM_PULLREQUEST_PULLREQUESTID', '') !== '') {
+// Only PR runs that asked for a comment need the token; stay silent otherwise.
+if (token === '' && postComment === 'true' && str('SYSTEM_PULLREQUEST_PULLREQUESTID', '') !== '') {
   console.log('##vso[task.logissue type=warning]No job access token available; the Upwind PR comment will be skipped. ' +
     'Grant the project build service identity "Contribute to pull requests" on the repository to enable it.');
 }
 
 const childEnv = Object.assign({}, env, {
-  UPWIND_DOCKER_IMAGE: str('INPUT_IMAGE', ''),
-  UPWIND_CLIENT_ID: str('INPUT_CLIENTID', ''),
-  UPWIND_CLIENT_SECRET: str('INPUT_CLIENTSECRET', ''),
+  UPWIND_DOCKER_IMAGE: str('INPUT_DOCKERIMAGE', ''),
+  UPWIND_CLIENT_ID: str('INPUT_UPWINDCLIENTID', ''),
+  UPWIND_CLIENT_SECRET: str('INPUT_UPWINDCLIENTSECRET', ''),
   UPWIND_URI: str('INPUT_UPWINDURI', 'upwind.io'),
   UPWIND_BLOCK_ON: str('INPUT_BLOCKON', ''),
   UPWIND_ENFORCE_BLOCK_POLICY: bool('INPUT_ENFORCEBLOCKPOLICY', 'false'),
   UPWIND_FAIL_ON_SCAN_ERROR: bool('INPUT_FAILONSCANERROR', 'false'),
   UPWIND_DOCKER_PULL: bool('INPUT_DOCKERPULL', 'true'),
+  UPWIND_DOCKER_USER: str('INPUT_DOCKERUSER', ''),
+  UPWIND_DOCKER_PASSWORD: str('INPUT_DOCKERPASSWORD', ''),
+  UPWIND_OCI_CLIENT: str('INPUT_OCICLIENT', 'docker'),
+  UPWIND_ADDITIONAL_REGISTRIES: str('INPUT_ADDITIONALREGISTRIES', ''),
+  UPWIND_MAIN_BRANCH: str('INPUT_MAINBRANCH', ''),
   UPWIND_AGENT_CHANNEL: str('INPUT_AGENTCHANNEL', 'stable'),
-  UPWIND_POST_COMMENT: bool('INPUT_POSTCOMMENT', 'true'),
+  UPWIND_POST_COMMENT: postComment,
   UPWIND_COMMENT_TOKEN: token,
 });
 
