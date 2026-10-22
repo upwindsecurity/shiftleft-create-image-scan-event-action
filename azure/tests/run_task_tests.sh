@@ -167,6 +167,15 @@ has 'not an executable file'; check "shiftleft path missing: error message" "$?"
 LIVE="$TMP/live"; mkdir -p "$LIVE"
 cat > "$TMP/stub_shiftleft.sh" <<'STUB'
 #!/bin/sh
+# Writes a plausible scan output unless told otherwise, so the output guard
+# sees a completed scan by default.
+if [ "${STUB_NO_OUTPUT:-0}" != "1" ]; then
+  if [ "${STUB_EMPTY_RESULT:-0}" = "1" ]; then
+    printf '{"status":"partial"}\n' > upwind-shift-left.json
+  else
+    printf '{"imageName":"myapp:abc123"}\n' > upwind-shift-left.json
+  fi
+fi
 exit "${STUB_SCAN_EXIT:-0}"
 STUB
 cat > "$TMP/stub_comment.sh" <<'STUB'
@@ -177,7 +186,7 @@ STUB
 chmod +x "$TMP/stub_shiftleft.sh"
 
 run_live() { # extra env as args -> RC, LOG (comment log), OUT
-  rm -f "$TMP/comment.log"
+  rm -f "$TMP/comment.log" "$LIVE/upwind-shift-left.json"
   OUT=$(cd "$LIVE" && env "${BASE_ENV[@]}" UPWIND_PIPE_DRY_RUN=0 \
     UPWIND_SHIFTLEFT_PATH="$TMP/stub_shiftleft.sh" UPWIND_COMMENT_SCRIPT="$TMP/stub_comment.sh" \
     STUB_LOG="$TMP/comment.log" "$@" bash "$ABS_ROOT/$SCAN" 2>&1); RC=$?
@@ -207,6 +216,36 @@ run_live "${PR_ENV[@]}" STUB_SCAN_EXIT=0
 
 run_live "${PR_ENV[@]}" UPWIND_COMMENT_TOKEN=tok BUILD_REPOSITORY_PROVIDER=GitHub STUB_SCAN_EXIT=0
 [ -z "$LOG" ]; check "live non-ado provider: comment script not run" "$?"
+
+# ---- output guard: the real check_scan_output.sh runs on the live path ----
+run_live STUB_SCAN_EXIT=0
+[ "$RC" -eq 0 ]; check "guard result present: exit 0" "$?"
+echo "$OUT" | grep -q 'Image scan completed'; check "guard result present: completion message" "$?"
+
+run_live STUB_SCAN_EXIT=0 STUB_EMPTY_RESULT=1
+[ "$RC" -eq 0 ]; check "guard no result, flag unset: exit 0" "$?"
+echo "$OUT" | grep -q 'Continuing because fail_on_scan_error is not set'; check "guard no result, flag unset: warning printed" "$?"
+
+run_live STUB_SCAN_EXIT=0 STUB_EMPTY_RESULT=1 UPWIND_FAIL_ON_SCAN_ERROR=true
+[ "$RC" -eq 1 ]; check "guard no result, flag true: exit 1" "$?"
+
+run_live STUB_SCAN_EXIT=0 STUB_NO_OUTPUT=1
+[ "$RC" -ne 0 ]; check "guard missing output file: nonzero even without the flag" "$?"
+
+run_live "${PR_ENV[@]}" UPWIND_COMMENT_TOKEN=tok STUB_SCAN_EXIT=3 STUB_EMPTY_RESULT=1 UPWIND_FAIL_ON_SCAN_ERROR=true
+[ "$RC" -eq 3 ]; check "guard + blocking scan: the scan's exit code wins" "$?"
+echo "$LOG" | grep -q 'COMMENT_RAN'; check "guard + blocking scan: comment still posted first" "$?"
+
+cat > "$TMP/stub_check.sh" <<'STUB'
+#!/bin/bash
+echo "CHECK_RAN $1 $2"
+exit 0
+STUB
+run_live STUB_SCAN_EXIT=0 UPWIND_CHECK_SCRIPT="$TMP/stub_check.sh" UPWIND_FAIL_ON_SCAN_ERROR=true
+echo "$OUT" | grep -q 'CHECK_RAN upwind-shift-left.json true'; check "guard: UPWIND_CHECK_SCRIPT override gets file + flag args" "$?"
+
+# ---- drift guard: the shipped copy must match the canonical script ----
+cmp -s ../scripts/check_scan_output.sh task/check_scan_output.sh; check "check_scan_output.sh: azure/task copy matches scripts/ canonical" "$?"
 
 # ---- syntax check ----
 bash -n task/scan.sh; check "scan.sh: bash -n" "$?"

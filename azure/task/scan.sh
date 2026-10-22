@@ -33,10 +33,13 @@
 #                           the OAuth + download (e2e with pre-release builds).
 #   UPWIND_COMMENT_SCRIPT   override the comment script location (default
 #                           upwind_ado_comment.sh next to this script).
+#   UPWIND_CHECK_SCRIPT     override the scan-output guard location (default
+#                           check_scan_output.sh next to this script).
 set -eu
 
 DRY_RUN="${UPWIND_PIPE_DRY_RUN:-0}"
 COMMENT_SCRIPT="${UPWIND_COMMENT_SCRIPT:-$(dirname "$0")/upwind_ado_comment.sh}"
+CHECK_SCRIPT="${UPWIND_CHECK_SCRIPT:-$(dirname "$0")/check_scan_output.sh}"
 
 CLIENT_ID="${UPWIND_CLIENT_ID:?set UPWIND_CLIENT_ID in the task inputs (Upwind sensor credential id)}"
 CLIENT_SECRET="${UPWIND_CLIENT_SECRET:?set UPWIND_CLIENT_SECRET in the task inputs (Upwind sensor credential secret)}"
@@ -147,6 +150,12 @@ else
   if "${SCAN_CMD[@]}"; then SCAN_EXIT=0; else SCAN_EXIT=$?; fi
   ELAPSED=$(( $(date +%s) - SCAN_START ))
   if [ "$ELAPSED" -ge 60 ]; then SCAN_DURATION_HUMAN="$((ELAPSED/60))m $((ELAPSED%60))s"; else SCAN_DURATION_HUMAN="${ELAPSED}s"; fi
+  # Guard against the CLI's fail-open paths: an output file with no result
+  # means the scan did not complete. Fails the task only when
+  # UPWIND_FAIL_ON_SCAN_ERROR=true (a missing file always fails); the
+  # comment below still runs first.
+  CHECK_EXIT=0
+  bash "$CHECK_SCRIPT" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR" || CHECK_EXIT=$?
 fi
 
 # ---- Sticky PR comment (never fails the build) ----
@@ -165,4 +174,7 @@ else
   bash "$COMMENT_SCRIPT" || echo "Warning: failed to post Upwind PR comment"
 fi
 
-exit "$SCAN_EXIT"
+# The scan's own exit code (for example a block verdict) wins over the
+# output guard's, same ordering as the Bitbucket pipe.
+if [ "$SCAN_EXIT" -ne 0 ]; then exit "$SCAN_EXIT"; fi
+exit "${CHECK_EXIT:-0}"

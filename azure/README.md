@@ -71,7 +71,7 @@ release channel.
 | `upwindUri` | no | `upwind.io` | Upwind domain: `upwind.io` or `upwind.dev` |
 | `blockOn` | no | never block | Fail the task on scan recommendation: `do_not_deploy` or `deploy_with_caution` |
 | `enforceBlockPolicy` | no | `false` | `true` to fail the task when the scan violates your organization's Upwind PR-block policy |
-| `failOnScanError` | no | `false` | `true` to fail the task when the scan cannot complete; without it the scanner exits 0 on most scan failures, so a blocking build can pass on an unscanned image |
+| `failOnScanError` | no | `false` | `true` to fail the task when the scan cannot complete or produces no result; without it the task only warns, so a blocking build can pass on an unscanned image |
 | `dockerPull` | no | `true` | `false` when the image was built earlier in the same pipeline (default: pull from the registry) |
 | `agentChannel` | no | `stable` | Release channel of the `shiftleft` binary |
 | `postComment` | no | `true` | `false` to never post the PR comment |
@@ -142,6 +142,9 @@ pull-request run, so the comment is posted.
 
 ## Troubleshooting
 
+- **`Upwind image scan produced no result`** - the scan failed or its results
+  were not ready within the wait window. The task fails when
+  `failOnScanError: true`, and otherwise continues with a warning.
 - **`Info: not a pull-request run; skipping Upwind PR comment`** - comments
   only post on runs queued by a Build Validation policy. Manual and
   CI-trigger runs scan and report to the Console only (and establish the
