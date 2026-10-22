@@ -5,6 +5,10 @@ org. Everything here is private test infrastructure; the extension is the privat
 (`vss-extension.dev.json`). Never publish the prod manifest from this runbook.
 
 Last full run: 2026-10-18, extension `upwindsecurity.upwind-image-scan-dev` v0.0.1, 4/4 scenarios passed.
+Last regression run: 2026-10-22, v0.0.4 (review fixes), all scenarios below passed.
+
+The dev extension publishes the task as `UpwindImageScanDev@0` (own GUID, see the release
+workflow's rebrand step), so the e2e YAML must reference that name, not `UpwindImageScan@0`.
 
 ## Environment
 
@@ -51,7 +55,7 @@ steps:
     clean: true
   - script: docker build -t upwind-e2e:$(Build.SourceVersion) azure-image-scan-e2e
     displayName: Build image
-  - task: UpwindImageScan@0
+  - task: UpwindImageScanDev@0
     displayName: Upwind image scan
     inputs:
       dockerImage: upwind-e2e:$(Build.SourceVersion)
@@ -77,6 +81,26 @@ Run link pattern: `https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_bu
 | 3 | Block AFTER comment: critical CVEs + `blockOn: do_not_deploy` | [8](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=8) | comment posts first, THEN the task fails the job; PR shows failed check | PASS. Log order: CLI prints `Blocking workflow because of 'DO NOT DEPLOY' scan recommendation`, then `Updating existing PR thread (54)` (history now 3 scans), then the task exits 1 (`result: failed`). PR #14 shows "1 required check failed"; policy evaluation `Build: rejected` for build 8 |
 
 Scan ids (Console deep links `https://console.upwind.dev/?redirectToCodeScanId=<id>`): run 5 `40be9b36cfd788fdde6dcb528bb7926572768a717d4daee081fb4c5a82b91781`, run 6 `0e6b8acda395b4ccbed9319a7a2c014e8fb856a237033854bff03b3e924141a7`, run 7 `bbdf7bfc20c78ed03a12610bdfac319bcbfe65db6afdf1f6fe6c7e0f531c9391`, run 8 `1bf0dcb70445530ae0f28a092031c5442ded7fe90670481ae6db2bd4e51c2a1f`.
+
+## Regression run 2026-10-22 (v0.0.4)
+
+| Scenario | Run | Result |
+|---|---|---|
+| PR scan + sticky update (PR #14, policy-triggered) | [11](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=11) | PASS. Task 0.0.4 with the renamed inputs and `postComment: true`; `Updating existing PR thread (54)`, history now 4 scans, thread still `closed`, no duplicate thread. The new history entry records the PR head commit `7bf35fe9` (not the merge commit `97e3a660` the build checked out); diff label reads "vs `image-scan-e2e-base`" |
+| Non-PR run: manual queue on `image-scan-e2e` | [13](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=13) | PASS. `Info: not a pull-request run; skipping Upwind PR comment`, exit 0, scan reported |
+
+| Block after comment: `blockOn: do_not_deploy`, Dockerfile `alpine:3.9` (new CVEs) | [15](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=15) | PASS. `Blocking workflow ... DO NOT DEPLOY`, then `Updating existing PR thread (54)`, then the task fails. The first attempt ([14](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=14)) did not block because the image matched the previous scan (0 new CVEs, CLI says proceed); the image must introduce new CVEs |
+| `postComment` unset (default off) | [16](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=16) | PASS. `Info: postComment is not enabled; skipping Upwind PR comment`; thread 54 unchanged |
+| `mainBranch: image-scan-e2e` override | [17](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=17) | PASS. Comment reads "vs `image-scan-e2e`" and the CLI diffs against that branch (0 new, vs 225 new against the PR target) |
+| No result: nonexistent image, `dockerPull: true` | [18](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=18) | PASS. "produced no result" surfaces as a `##[warning]` issue on the run summary; step green |
+| No result + `failOnScanError: true` | [19](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=19) | PASS. Same message as a `##[error]` issue; task fails |
+| Job name | RDB | PASS. Dev org `org_8xFvjw2CxGPfGjwr` (host `aurora01-development-ro.dev.internal`), `shift_left_events.repositoryScanDetails`: every 0.0.4 run has `jobName = "Job"` (the implicit job's `System.JobDisplayName`) and run 17 has `mainBranchName = image-scan-e2e`; runs on 0.0.1/0.0.3 have `jobName` NULL |
+
+Final state: PR branch back on the green setup ([20](https://dev.azure.com/upwind-shiftleft-dev/shiftleft-test/_build/results?buildId=20)): `postComment: true`, Dockerfile `alpine:3.9`, thread 54 with 8 scans. Not exercised live: private-registry inputs (`dockerUser`, `dockerPassword`, `additionalRegistries`, `ociClient` other than docker) and `enforceBlockPolicy`.
+
+`image-scan-e2e-base` now rejects direct pushes (TF402455) because of the Build Validation
+policy, so its YAML still references the old task. Run the non-PR scenario against
+`image-scan-e2e` instead.
 
 ### Deviations from the original plan
 
