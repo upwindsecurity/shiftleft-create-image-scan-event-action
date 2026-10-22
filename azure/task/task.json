@@ -66,6 +66,14 @@
       "helpMarkDown": "Fail the task when the organization's Upwind PR block policy blocks the image."
     },
     {
+      "name": "failOnScanError",
+      "type": "boolean",
+      "label": "Fail on scan error",
+      "defaultValue": false,
+      "required": false,
+      "helpMarkDown": "Fail the task when the scan cannot complete. Without it the scanner exits 0 on most scan failures, so a blocking build can pass on an image that was never scanned."
+    },
+    {
       "name": "dockerPull",
       "type": "boolean",
       "label": "Pull image",

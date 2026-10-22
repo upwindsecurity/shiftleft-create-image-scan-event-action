@@ -14,13 +14,15 @@
 #   UPWIND_URI                  optional  upwind.io (default) | upwind.dev
 #   UPWIND_BLOCK_ON             optional  do_not_deploy | deploy_with_caution
 #   UPWIND_ENFORCE_BLOCK_POLICY optional  true to fail on org PR-block policy
+#   UPWIND_FAIL_ON_SCAN_ERROR   optional  true to fail the task when the scan
+#                                         cannot complete (default false)
 #   UPWIND_DOCKER_PULL          optional  false when the image was built in
 #                                         this pipeline (default true)
 #   UPWIND_AGENT_CHANNEL        optional  shiftleft release channel (stable)
 #   UPWIND_POST_COMMENT         optional  false to never post the PR comment
 # Azure Pipelines predefined variables used:
 #   BUILD_SOURCEVERSION, BUILD_SOURCEBRANCH, BUILD_REPOSITORY_URI,
-#   BUILD_REPOSITORY_NAME, BUILD_BUILDID, BUILD_DEFINITIONNAME,
+#   BUILD_REPOSITORY_NAME, BUILD_REPOSITORY_PROVIDER, BUILD_BUILDID, BUILD_DEFINITIONNAME,
 #   BUILD_REQUESTEDFOR, SYSTEM_TEAMFOUNDATIONCOLLECTIONURI, SYSTEM_TEAMPROJECT,
 #   SYSTEM_PULLREQUEST_SOURCEBRANCH, SYSTEM_PULLREQUEST_TARGETBRANCH,
 #   SYSTEM_PULLREQUEST_PULLREQUESTID
@@ -42,6 +44,7 @@ DOCKER_IMAGE="${UPWIND_DOCKER_IMAGE:?set UPWIND_DOCKER_IMAGE to the image to sca
 UPWIND_URI="${UPWIND_URI:-upwind.io}"
 BLOCK_ON="${UPWIND_BLOCK_ON:-}"                     # do_not_deploy | deploy_with_caution | empty
 ENFORCE_BLOCK_POLICY="${UPWIND_ENFORCE_BLOCK_POLICY:-false}"
+FAIL_ON_SCAN_ERROR="${UPWIND_FAIL_ON_SCAN_ERROR:-false}"
 DOCKER_PULL="${UPWIND_DOCKER_PULL:-true}"           # false when the image is built in this pipeline
 AGENT_CHANNEL="${UPWIND_AGENT_CHANNEL:-stable}"
 POST_COMMENT="${UPWIND_POST_COMMENT:-true}"
@@ -79,6 +82,14 @@ ADO_BASE="${ADO_BASE%/}/${PROJECT_ENC}"
 IS_PR=false
 [ -n "${SYSTEM_PULLREQUEST_PULLREQUESTID:-}" ] && IS_PR=true
 
+# PR ids, PR links and the Threads comment API are Azure Repos concepts. For a
+# GitHub or Bitbucket repo built in Azure Pipelines, SYSTEM_PULLREQUEST_PULLREQUESTID
+# holds the provider's internal id and the repo does not exist in the ADO project,
+# so the scan keeps its branch context but skips the PR id/link and the comment.
+REPO_PROVIDER="${BUILD_REPOSITORY_PROVIDER:-TfsGit}"
+IS_ADO_REPO=false
+[ "$REPO_PROVIDER" = "TfsGit" ] && IS_ADO_REPO=true
+
 if [ "$IS_PR" = "true" ]; then
   BRANCH="${SYSTEM_PULLREQUEST_SOURCEBRANCH:-}"
 else
@@ -95,8 +106,10 @@ set --
 if [ "$IS_PR" = "true" ]; then
   MAIN_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
   set -- "$@" --main-branch="${MAIN_BRANCH#refs/heads/}"
-  set -- "$@" --pr-id="${SYSTEM_PULLREQUEST_PULLREQUESTID}"
-  set -- "$@" --pr-link="${ADO_BASE}/_git/${REPO_NAME_ENC}/pullrequest/${SYSTEM_PULLREQUEST_PULLREQUESTID}"
+  if [ "$IS_ADO_REPO" = "true" ]; then
+    set -- "$@" --pr-id="${SYSTEM_PULLREQUEST_PULLREQUESTID}"
+    set -- "$@" --pr-link="${ADO_BASE}/_git/${REPO_NAME_ENC}/pullrequest/${SYSTEM_PULLREQUEST_PULLREQUESTID}"
+  fi
 fi
 set -- "$@" --pipeline-run-id="${BUILD_BUILDID:-}"
 set -- "$@" --pipeline-run-link="${ADO_BASE}/_build/results?buildId=${BUILD_BUILDID:-}"
@@ -118,6 +131,10 @@ SCAN_CMD=("$SHIFTLEFT" image
   --docker-pull="${DOCKER_PULL}"
   --oci-client=docker
   "$@")
+# Only when asked for: older binaries reject unknown flags.
+if [ "$FAIL_ON_SCAN_ERROR" = "true" ]; then
+  SCAN_CMD+=(--fail-on-scan-error)
+fi
 
 if [ "$DRY_RUN" = "1" ]; then
   # Credentials stay out of the dry-run output.
@@ -137,6 +154,8 @@ if [ "$POST_COMMENT" = "false" ]; then
   echo "Info: UPWIND_POST_COMMENT=false; skipping Upwind PR comment"
 elif [ "$IS_PR" != "true" ]; then
   echo "Info: not a pull-request run; skipping Upwind PR comment"
+elif [ "$IS_ADO_REPO" != "true" ]; then
+  echo "Info: repository provider '${REPO_PROVIDER}' is not Azure Repos; skipping Upwind PR comment"
 elif [ -z "${UPWIND_COMMENT_TOKEN:-}" ]; then
   echo "Info: UPWIND_COMMENT_TOKEN not set; skipping Upwind PR comment"
 elif [ "$DRY_RUN" = "1" ]; then

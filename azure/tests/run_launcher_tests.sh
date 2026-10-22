@@ -39,7 +39,7 @@ run_launcher() { # extra env as args -> OUT, RC (stub scan.sh)
 run_launcher \
   INPUT_UPWINDURI=upwind.dev INPUT_BLOCKON=do_not_deploy INPUT_ENFORCEBLOCKPOLICY=true \
   INPUT_DOCKERPULL=false INPUT_AGENTCHANNEL=beta INPUT_POSTCOMMENT=true \
-  SYSTEM_ACCESSTOKEN=sys-token
+  INPUT_FAILONSCANERROR=true SYSTEM_ACCESSTOKEN=sys-token
 check "mapping: exits 0" "$RC"
 has 'UPWIND_DOCKER_IMAGE=myapp:abc123'; check "mapping: image" "$?"
 has 'UPWIND_CLIENT_ID=cid'; check "mapping: client id" "$?"
@@ -50,6 +50,7 @@ has 'UPWIND_ENFORCE_BLOCK_POLICY=true'; check "mapping: enforce block policy" "$
 has 'UPWIND_DOCKER_PULL=false'; check "mapping: docker pull" "$?"
 has 'UPWIND_AGENT_CHANNEL=beta'; check "mapping: agent channel" "$?"
 has 'UPWIND_POST_COMMENT=true'; check "mapping: post comment" "$?"
+has 'UPWIND_FAIL_ON_SCAN_ERROR=true'; check "mapping: fail on scan error" "$?"
 
 # ---- defaults when optional inputs are absent ----
 run_launcher SYSTEM_ACCESSTOKEN=t
@@ -59,6 +60,7 @@ has 'UPWIND_ENFORCE_BLOCK_POLICY=false'; check "defaults: enforce false" "$?"
 has 'UPWIND_DOCKER_PULL=true'; check "defaults: docker pull true" "$?"
 has 'UPWIND_AGENT_CHANNEL=stable'; check "defaults: channel stable" "$?"
 has 'UPWIND_POST_COMMENT=true'; check "defaults: post comment true" "$?"
+has 'UPWIND_FAIL_ON_SCAN_ERROR=false'; check "defaults: fail on scan error false" "$?"
 
 # ---- boolean normalization (ADO may deliver True/False) ----
 run_launcher INPUT_POSTCOMMENT=False INPUT_DOCKERPULL=False INPUT_ENFORCEBLOCKPOLICY=True SYSTEM_ACCESSTOKEN=t

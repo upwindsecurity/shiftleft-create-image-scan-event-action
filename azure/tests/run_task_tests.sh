@@ -129,6 +129,26 @@ has '--block-on=do_not_deploy'; check "knobs: block-on" "$?"
 has '--enforce-block-policy=true'; check "knobs: enforce block policy" "$?"
 has '--upwind-uri=upwind.dev'; check "knobs: uri override" "$?"
 
+# ---- fail on scan error: opt-in flag ----
+run_scan
+if has '--fail-on-scan-error'; then check "fail-on-scan-error: absent by default" 1; else check "fail-on-scan-error: absent by default" 0; fi
+run_scan UPWIND_FAIL_ON_SCAN_ERROR=true
+check "fail-on-scan-error=true: exits 0" "$RC"
+has '--fail-on-scan-error'; check "fail-on-scan-error=true: flag added" "$?"
+
+# ---- non-Azure-Repos provider: branch context kept, no PR id/link, no comment ----
+run_scan "${PR_ENV[@]}" BUILD_REPOSITORY_PROVIDER=GitHub UPWIND_COMMENT_TOKEN=tok
+check "github provider: exits 0" "$RC"
+has '--main-branch=main'; check "github provider: main branch kept for the baseline diff" "$?"
+for f in --pr-id --pr-link; do
+  if has "$f"; then check "github provider: no $f" 1; else check "github provider: no $f" 0; fi
+done
+has "repository provider 'GitHub' is not Azure Repos; skipping Upwind PR comment"; check "github provider: comment skipped with provider message" "$?"
+if has 'would post'; then check "github provider: no post even with token" 1; else check "github provider: no post even with token" 0; fi
+run_scan "${PR_ENV[@]}" BUILD_REPOSITORY_PROVIDER=TfsGit UPWIND_COMMENT_TOKEN=tok
+has '--pr-id=9'; check "tfsgit provider: pr id present" "$?"
+has 'would post'; check "tfsgit provider: would post comment" "$?"
+
 # ---- tag run ----
 run_scan BUILD_SOURCEBRANCH=refs/tags/v9.9.9
 check "tag: exits 0" "$RC"
@@ -184,6 +204,9 @@ run_live UPWIND_COMMENT_TOKEN=tok STUB_SCAN_EXIT=0
 
 run_live "${PR_ENV[@]}" STUB_SCAN_EXIT=0
 [ -z "$LOG" ]; check "live no token: comment script not run" "$?"
+
+run_live "${PR_ENV[@]}" UPWIND_COMMENT_TOKEN=tok BUILD_REPOSITORY_PROVIDER=GitHub STUB_SCAN_EXIT=0
+[ -z "$LOG" ]; check "live non-ado provider: comment script not run" "$?"
 
 # ---- syntax check ----
 bash -n task/scan.sh; check "scan.sh: bash -n" "$?"

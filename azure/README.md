@@ -71,9 +71,19 @@ release channel.
 | `upwindUri` | no | `upwind.io` | Upwind domain: `upwind.io` or `upwind.dev` |
 | `blockOn` | no | never block | Fail the task on scan recommendation: `do_not_deploy` or `deploy_with_caution` |
 | `enforceBlockPolicy` | no | `false` | `true` to fail the task when the scan violates your organization's Upwind PR-block policy |
+| `failOnScanError` | no | `false` | `true` to fail the task when the scan cannot complete; without it the scanner exits 0 on most scan failures, so a blocking build can pass on an unscanned image |
 | `dockerPull` | no | `true` | `false` when the image was built earlier in the same pipeline (default: pull from the registry) |
 | `agentChannel` | no | `stable` | Release channel of the `shiftleft` binary |
 | `postComment` | no | `true` | `false` to never post the PR comment |
+
+## Azure Repos only (PR comment and PR context)
+
+Azure Pipelines can also build repositories hosted on GitHub or Bitbucket.
+The scan and blocking work there too, but the PR comment and the PR id/link
+are Azure Repos concepts: when `Build.Repository.Provider` is not `TfsGit`,
+the task logs `repository provider '<provider>' is not Azure Repos` and skips
+them. The branch and target-branch context is still sent, so baseline diffing
+works.
 
 ## Allow the task to comment on pull requests
 
