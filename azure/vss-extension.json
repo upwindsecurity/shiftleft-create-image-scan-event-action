@@ -20,6 +20,10 @@
   "files": [
     {
       "path": "task"
+    },
+    {
+      "path": "overview.md",
+      "addressable": true
     }
   ],
   "contributions": [
@@ -33,5 +37,10 @@
         "name": "task"
       }
     }
-  ]
+  ],
+  "content": {
+    "details": {
+      "path": "overview.md"
+    }
+  }
 }
