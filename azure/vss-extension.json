@@ -5,7 +5,7 @@
   "version": "0.0.1",
   "name": "Upwind Image Scan",
   "description": "Scan container images with Upwind ShiftLeft and comment the results on pull requests.",
-  "public": false,
+  "public": true,
   "categories": [
     "Azure Pipelines"
   ],
