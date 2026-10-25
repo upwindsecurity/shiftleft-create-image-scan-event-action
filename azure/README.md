@@ -28,7 +28,7 @@ updates one comment thread per PR.
    steps:
      - script: docker build -t myapp:$(Build.SourceVersion) .
        displayName: Build image
-     - task: UpwindImageScan@0
+     - task: UpwindImageScan@1
        inputs:
          dockerImage: myapp:$(Build.SourceVersion)
          upwindClientId: $(UPWIND_CLIENT_ID)
@@ -58,8 +58,9 @@ updates one comment thread per PR.
    YAML `pr:` trigger, so the policy is also what makes a run a "pull-request
    run" that can post a comment.
 
-The `@0` in `UpwindImageScan@0` floats on the latest `0.x.y` release of the
-task, so fixes arrive without pipeline changes. Scan logic itself ships in
+The `@1` in `UpwindImageScan@1` floats on the latest `1.x.y` release of the
+task, so fixes arrive without pipeline changes. A breaking change would ship
+as `@2`, which you opt in to by editing your pipeline. Scan logic itself ships in
 the `shiftleft` binary, which the task always fetches from your configured
 release channel.
 
@@ -157,7 +158,7 @@ policy is violated. The report comment is still posted before the task
 exits.
 
 ```yaml
-- task: UpwindImageScan@0
+- task: UpwindImageScan@1
   inputs:
     dockerImage: myapp:$(Build.SourceVersion)
     upwindClientId: $(UPWIND_CLIENT_ID)
@@ -200,7 +201,7 @@ pull-request run, so the comment is posted.
 - **`docker: command not found` / cannot connect to the docker daemon** -
   the agent has no docker. Use a Microsoft-hosted Ubuntu image, or install
   docker on your self-hosted agent and make sure the agent user can run it.
-- **The task is rejected or the pipeline cannot find `UpwindImageScan@0`** -
+- **The task is rejected or the pipeline cannot find `UpwindImageScan@1`** -
   the extension is not installed in this organization, or the organization
   has a task restrictions policy. If the organization restricts which tasks
   may use commands or set variables, the Upwind task declares restricted

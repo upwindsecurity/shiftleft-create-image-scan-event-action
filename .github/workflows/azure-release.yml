@@ -4,6 +4,9 @@
 # namespaces:
 #   azure-dev-vX.Y.Z -> azure/vss-extension.dev.json (upwind-image-scan-dev, private)
 #   azure-vX.Y.Z     -> azure/vss-extension.json     (upwind-image-scan)
+# Customer pipelines pin the task major (`UpwindImageScan@1`) and float on every
+# 1.x.y release, so a customer tag reaches every pipeline on its next run: try
+# changes on an azure-dev tag first. Bump the major only for breaking changes.
 #
 # Authenticates to the Marketplace with Microsoft Entra OIDC; there is no
 # stored secret. The job requests a GitHub OIDC token (environment
