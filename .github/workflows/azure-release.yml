@@ -1,0 +1,205 @@
+# Publishes the Upwind image scan Azure DevOps extension to the Visual Studio
+# Marketplace. The extension versions independently of the GitHub action
+# (`v*.*.*`) and the Bitbucket pipe (`bitbucket-v*.*.*`), in its own tag
+# namespaces:
+#   azure-dev-vX.Y.Z -> azure/vss-extension.dev.json (upwind-image-scan-dev, private)
+#   azure-vX.Y.Z     -> azure/vss-extension.json     (upwind-image-scan)
+# Customer pipelines pin the task major (`UpwindImageScan@1`) and float on every
+# 1.x.y release, so a customer tag reaches every pipeline on its next run: try
+# changes on an azure-dev tag first. Bump the major only for breaking changes.
+#
+# Authenticates to the Marketplace with Microsoft Entra OIDC; there is no
+# stored secret. The job requests a GitHub OIDC token (environment
+# `marketplace`), azure/login exchanges it for an Entra token as the app
+# registration `upwind-marketplace-publisher-ci`, and the VSIX is uploaded
+# through the Marketplace Gallery REST API with that bearer token.
+# One-time setup:
+#   - The app has a federated credential with subject
+#     repo:upwindsecurity/shiftleft-create-image-scan-event-action:environment:marketplace
+#     (issuer https://token.actions.githubusercontent.com,
+#     audience api://AzureADTokenExchange).
+#   - The app's service principal is a member (Contributor) of the Marketplace
+#     publisher `upwindsecurity`.
+#   - Repo variables AZURE_MARKETPLACE_CLIENT_ID and AZURE_TENANT_ID hold the
+#     app and tenant ids (public identifiers, not secrets).
+name: Azure Task Release
+
+on:
+  push:
+    tags:
+      - 'azure-v*.*.*'
+      - 'azure-dev-v*.*.*'
+
+# Packaging runs third-party code from npm (tfx-cli), so it lives in its own
+# job with read-only permissions; only the publish job may mint an OIDC token.
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      publisher: ${{ steps.resolve.outputs.publisher }}
+      ext_id: ${{ steps.resolve.outputs.ext_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Comment script tests
+        run: bash azure/tests/run_comment_tests.sh
+
+      - name: Task tests
+        run: bash azure/tests/run_task_tests.sh
+
+      - name: Launcher tests
+        run: bash azure/tests/run_launcher_tests.sh
+
+      # Derive VERSION and MANIFEST from the tag with an explicit match on the
+      # whole ref name, so an azure-dev-v* tag can never select the prod
+      # manifest. The version must be strictly numeric X.Y.Z.
+      - name: Resolve version and manifest from tag
+        id: resolve
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^azure-dev-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            MANIFEST=azure/vss-extension.dev.json
+            IS_DEV=true
+          elif [[ "$TAG" =~ ^azure-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            MANIFEST=azure/vss-extension.json
+            IS_DEV=false
+          else
+            echo "::error::Unsupported tag '$TAG' (expected azure-vX.Y.Z or azure-dev-vX.Y.Z)"
+            exit 1
+          fi
+          VERSION="${BASH_REMATCH[1]}"
+          echo "Releasing $VERSION with $MANIFEST"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "MANIFEST=$MANIFEST" >> "$GITHUB_ENV"
+          echo "IS_DEV=$IS_DEV" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "publisher=$(jq -r '.publisher' "$MANIFEST")" >> "$GITHUB_OUTPUT"
+          echo "ext_id=$(jq -r '.id' "$MANIFEST")" >> "$GITHUB_OUTPUT"
+
+      # Both versions must bump or Azure DevOps ignores the update: the
+      # extension manifest version and the task.json version object.
+      - name: Sync versions
+        run: |
+          set -euo pipefail
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          jq --arg v "$VERSION" '.version = $v' "$MANIFEST" > "$MANIFEST.tmp"
+          mv "$MANIFEST.tmp" "$MANIFEST"
+          jq --argjson maj "$MAJOR" --argjson min "$MINOR" --argjson pat "$PATCH" \
+            '.version = {Major: $maj, Minor: $min, Patch: $pat}' \
+            azure/task/task.json > azure/task/task.json.tmp
+          mv azure/task/task.json.tmp azure/task/task.json
+          jq '.version' "$MANIFEST" azure/task/task.json
+
+      # Task ids and names are org-global in Azure DevOps: the dev and prod
+      # extensions collide if they ship the same task. The dev build gets its
+      # own id and name so both can be installed in one org.
+      - name: Rebrand task for the dev extension
+        if: env.IS_DEV == 'true'
+        run: |
+          set -euo pipefail
+          jq '.id = "8e1692a8-ce8c-4b59-a417-eec31af3d7df"
+              | .name = "UpwindImageScanDev"
+              | .friendlyName += " (Dev)"' \
+            azure/task/task.json > azure/task/task.json.tmp
+          mv azure/task/task.json.tmp azure/task/task.json
+          jq '{id: .id, name: .name}' azure/task/task.json
+
+      # Packaging needs no credentials. tfx-cli is pinned: this third-party
+      # code must not float on a release path.
+      - name: Package extension
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vsix"
+          # --root azure: manifest file paths (task/, images/) resolve
+          # relative to azure/, and the package layout must match the
+          # contribution's `properties.name: "task"`. Packaging from the
+          # repo root nests everything under azure/ and the Marketplace's
+          # deep validation then fails with "The task.json file was not
+          # found in contribution task".
+          npx --yes tfx-cli@0.24.2 extension create \
+            --root azure \
+            --manifest-globs "$(basename "$MANIFEST")" \
+            --output-path "$RUNNER_TEMP/vsix" \
+            --no-prompt
+          ls "$RUNNER_TEMP/vsix"/*.vsix
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: ${{ runner.temp }}/vsix/*.vsix
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: package
+    environment: marketplace
+    permissions:
+      id-token: write
+    env:
+      VERSION: ${{ needs.package.outputs.version }}
+      PUBLISHER: ${{ needs.package.outputs.publisher }}
+      EXT_ID: ${{ needs.package.outputs.ext_id }}
+    steps:
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: ${{ runner.temp }}/vsix
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_MARKETPLACE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      # Resource 499b84ac-1321-427f-aa17-267ca6975798 is Azure DevOps, which
+      # the Marketplace accepts. POST creates a new extension, PUT updates an
+      # existing one; any non-2xx response fails the job with its body.
+      - name: Publish extension
+        run: |
+          set -euo pipefail
+          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
+          BASE="https://marketplace.visualstudio.com/_apis/gallery/publishers/$PUBLISHER/extensions"
+          API="api-version=7.1-preview.2"
+
+          TOKEN=$(az account get-access-token \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query accessToken --output tsv)
+          echo "::add-mask::$TOKEN"
+
+          BODY="$RUNNER_TEMP/response.json"
+          status() {
+            curl --silent --show-error --output "$BODY" --write-out '%{http_code}' \
+              --header "Authorization: Bearer $TOKEN" "$@"
+          }
+
+          EXISTS=$(status "$BASE/$EXT_ID?$API")
+          case "$EXISTS" in
+            200) METHOD=PUT;  URL="$BASE/$EXT_ID?$API" ;;
+            404) METHOD=POST; URL="$BASE?$API" ;;
+            *)
+              echo "::error::Lookup of $PUBLISHER.$EXT_ID failed with HTTP $EXISTS"
+              cat "$BODY"
+              exit 1
+              ;;
+          esac
+
+          echo "Uploading $(basename "$VSIX") with $METHOD"
+          CODE=$(status --request "$METHOD" \
+            --header 'Content-Type: application/octet-stream' \
+            --data-binary "@$VSIX" "$URL")
+          if [[ ! "$CODE" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Marketplace upload failed with HTTP $CODE"
+            cat "$BODY"
+            exit 1
+          fi
+          echo "Published $PUBLISHER.$EXT_ID $VERSION (HTTP $CODE)"

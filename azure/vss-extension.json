@@ -1,0 +1,46 @@
+{
+  "manifestVersion": 1,
+  "id": "upwind-image-scan",
+  "publisher": "upwindsecurity",
+  "version": "0.0.1",
+  "name": "Upwind Image Scan",
+  "description": "Scan container images with Upwind ShiftLeft and comment the results on pull requests.",
+  "public": true,
+  "categories": [
+    "Azure Pipelines"
+  ],
+  "targets": [
+    {
+      "id": "Microsoft.VisualStudio.Services"
+    }
+  ],
+  "icons": {
+    "default": "images/icon.png"
+  },
+  "files": [
+    {
+      "path": "task"
+    },
+    {
+      "path": "overview.md",
+      "addressable": true
+    }
+  ],
+  "contributions": [
+    {
+      "id": "upwind-image-scan-task",
+      "type": "ms.vss-distributed-task.task",
+      "targets": [
+        "ms.vss-distributed-task.tasks"
+      ],
+      "properties": {
+        "name": "task"
+      }
+    }
+  ],
+  "content": {
+    "details": {
+      "path": "overview.md"
+    }
+  }
+}
