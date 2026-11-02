@@ -291,9 +291,9 @@ runs:
           exit 0
         fi
 
-        # Regional tenants (eu/me/ap) share the global console host; only
+        # Regional tenants (eu/me/ap/au) share the global console host; only
         # upwind.dev and private regions have a console of their own.
-        CONSOLE_HOST="console.$(echo "${UPWIND_URI:-upwind.io}" | sed -E 's/^(eu|me|ap)\.//')"
+        CONSOLE_HOST="console.$(echo "${UPWIND_URI:-upwind.io}" | sed -E 's/^(eu|me|ap|au)\.//')"
 
         # Marker for our sticky comment: we edit it in place each run. With no
         # DB (unlike SCA/IaC), history lives in a hidden base64 blob in the body.
