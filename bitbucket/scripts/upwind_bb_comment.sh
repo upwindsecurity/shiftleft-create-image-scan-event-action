@@ -191,11 +191,11 @@ while IFS= read -r scan; do
 done < <(jq -c '.[]' "$ARRAY")
 
 if [ -n "$FINGERPRINT" ]; then
-  # Shared regions (eu/me/ap) use the global console; dedicated deployments
+  # Shared regions (eu/me/ap/au) use the global console; dedicated deployments
   # (e.g. pdc02.upwind.io) keep their own. Mirrors the CLI's consoleScanURL.
   CONSOLE_HOST="${UPWIND_URI:-upwind.io}"
   case "$CONSOLE_HOST" in
-    eu.*|me.*|ap.*) CONSOLE_HOST="${CONSOLE_HOST#*.}" ;;
+    eu.*|me.*|ap.*|au.*) CONSOLE_HOST="${CONSOLE_HOST#*.}" ;;
   esac
   COMMENT+="[View full analysis in Upwind Console →](https://console.${CONSOLE_HOST}/?redirectToCodeScanId=${FINGERPRINT})"$'\n\n'
 fi
