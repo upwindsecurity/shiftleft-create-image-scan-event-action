@@ -19,6 +19,8 @@ Under the hood it downloads the `shiftleft` binary from the Upwind release bucke
 
 Define the following inputs in your workflow to configure the action:
 
+Inputs are passed to the scan as plain values and are never run as shell code. In `docker_image`, `additional_registries`, `commit_sha`, `repository` and `branch`, environment-variable references written as `$NAME` or `${NAME}` (for example `docker_image: app:${GITHUB_SHA}`) are still expanded. Other shell syntax, such as `$(...)` or `${NAME:-default}`, is passed through as literal text. Prefer `${{ github.sha }}`-style expressions where you can.
+
 | Input                                  | Required | Default         | Description                                                                                                                         |
 |----------------------------------------|----------|-----------------|-------------------------------------------------------------------------------------------------------------------------------------|
 | `upwind_client_id`                     | Yes      | –               | Your Upwind Client ID.                                                                                                              |
