@@ -17,6 +17,12 @@ jobs:
       - name: Guard script tests
         shell: bash
         run: bash tests/check_scan_output_test.sh
+      - name: Input expansion tests
+        shell: bash
+        run: bash tests/expand_env_refs_test.sh
+      - name: Shell injection tests
+        shell: bash
+        run: bash tests/injection_test.sh
 
   Build:
     runs-on: ubuntu-22.04

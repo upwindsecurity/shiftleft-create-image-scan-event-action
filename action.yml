@@ -114,21 +114,29 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Inputs reach every run: script through env: and never as ${{ inputs.* }}
+    # inside the script: GitHub pastes expressions in as text before bash parses
+    # it, so a value containing $(...) would run as a command.
     - name: Validate required inputs
       shell: bash
+      env:
+        INPUT_ADD_COMMENT: ${{ inputs.add_comment }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        INPUT_REPO_NAME: ${{ inputs.repo_name }}
       run: |
-        if [ "${{ inputs.add_comment }}" = "true" ]; then
+        if [ "$INPUT_ADD_COMMENT" = "true" ]; then
           missing=""
 
-          if [ -z "${{ inputs.github_token }}" ]; then
+          if [ -z "$INPUT_GITHUB_TOKEN" ]; then
             missing+=" github_token"
           fi
 
-          if [ -z "${{ inputs.pr_number }}" ]; then
+          if [ -z "$INPUT_PR_NUMBER" ]; then
             missing+=" pr_number"
           fi
 
-          if [ -z "${{ inputs.repo_name }}" ]; then
+          if [ -z "$INPUT_REPO_NAME" ]; then
             missing+=" repo_name"
           fi
 
@@ -141,12 +149,16 @@ runs:
       id: download_binary
 
       shell: bash
+      env:
+        INPUT_UPWIND_URI: ${{ inputs.upwind_uri }}
+        INPUT_UPWIND_CLIENT_ID: ${{ inputs.upwind_client_id }}
+        INPUT_UPWIND_CLIENT_SECRET: ${{ inputs.upwind_client_secret }}
       run: |
         response=$(curl -sSL -X POST \
-        --url "https://oauth.${{ inputs.upwind_uri }}/oauth/token" \
-        --data "audience=https://agent.${{ inputs.upwind_uri }}" \
-        --data "client_id=${{ inputs.upwind_client_id }}" \
-        --data "client_secret=${{ inputs.upwind_client_secret }}" \
+        --url "https://oauth.${INPUT_UPWIND_URI}/oauth/token" \
+        --data-urlencode "audience=https://agent.${INPUT_UPWIND_URI}" \
+        --data-urlencode "client_id=${INPUT_UPWIND_CLIENT_ID}" \
+        --data-urlencode "client_secret=${INPUT_UPWIND_CLIENT_SECRET}" \
         --data "grant_type=client_credentials")
 
         if ! TOKEN=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null); then
@@ -175,7 +187,7 @@ runs:
 
         UPWIND_AGENT="shiftleft"
         AGENT_OUTPUT="./$UPWIND_AGENT"
-        if [[ "${{ inputs.upwind_uri }}" == "upwind.dev" ]]; then
+        if [[ "$INPUT_UPWIND_URI" == "upwind.dev" ]]; then
           RELEASE_BUCKET="releases.upwind.dev"
         else
           RELEASE_BUCKET="releases.upwind.io"
@@ -193,23 +205,44 @@ runs:
         PR_ID: ${{ inputs.pr_id }}
         PR_LINK: ${{ inputs.pr_link }}
         FAIL_ON_SCAN_ERROR: ${{ inputs.fail_on_scan_error }}
+        INPUT_UPWIND_URI: ${{ inputs.upwind_uri }}
+        INPUT_UPWIND_CLIENT_ID: ${{ inputs.upwind_client_id }}
+        INPUT_UPWIND_CLIENT_SECRET: ${{ inputs.upwind_client_secret }}
+        INPUT_DOCKER_IMAGE: ${{ inputs.docker_image }}
+        INPUT_DOCKER_USER: ${{ inputs.docker_user }}
+        INPUT_DOCKER_PASSWORD: ${{ inputs.docker_password }}
+        INPUT_PULL_IMAGE: ${{ inputs.pull_image }}
+        INPUT_OCI_CLIENT: ${{ inputs.oci_client }}
+        INPUT_ADDITIONAL_REGISTRIES: ${{ inputs.additional_registries }}
+        INPUT_COMMIT_SHA: ${{ inputs.commit_sha }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_USE_SUDO: ${{ inputs.use_sudo }}
+        INPUT_PERFORM_MULTIARCH_SCAN: ${{ inputs.perform_multiarchitecture_image_scan }}
+        INPUT_DEBUG: ${{ inputs.debug }}
+        INPUT_BLOCK_ON: ${{ inputs.block_on }}
       run: |
         echo "Running Upwind Scan"
         SCAN_START=$(date +%s)
-        COMMIT_SHA=${GITHUB_SHA}
-        if [[ -n "${{ inputs.commit_sha }}" ]]; then
-          COMMIT_SHA=${{ inputs.commit_sha }}
+        ACTION_PATH="${GITHUB_ACTION_PATH:-${{ github.action_path }}}"
+        expand() { bash "$ACTION_PATH/scripts/expand_env_refs.sh" "$1"; }
+
+        DOCKER_IMAGE="$(expand "$INPUT_DOCKER_IMAGE")"
+        ADDITIONAL_REGISTRIES="$(expand "$INPUT_ADDITIONAL_REGISTRIES")"
+        COMMIT_SHA="$(expand "$INPUT_COMMIT_SHA")"
+        if [[ -z "$COMMIT_SHA" ]]; then
+          COMMIT_SHA="${GITHUB_SHA}"
         fi
-        REPOSITORY="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-        if [[ -n "${{ inputs.repository }}" ]]; then
-          REPOSITORY="${{ inputs.repository }}"
+        REPOSITORY="$(expand "$INPUT_REPOSITORY")"
+        if [[ -z "$REPOSITORY" ]]; then
+          REPOSITORY="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
         fi
-        BRANCH="${GITHUB_REF}"
-        if [[ -n "${{ inputs.branch }}" ]]; then
-          BRANCH="${{ inputs.branch }}"
+        BRANCH="$(expand "$INPUT_BRANCH")"
+        if [[ -z "$BRANCH" ]]; then
+          BRANCH="${GITHUB_REF}"
         fi
         SUDO=""
-        if [ "${{ inputs.use_sudo }}" = "true" ]; then
+        if [ "$INPUT_USE_SUDO" = "true" ]; then
           SUDO=sudo
         fi
 
@@ -243,25 +276,25 @@ runs:
 
         $SUDO ./shiftleft image \
           --source=GITHUB_ACTIONS \
-          --initiator=${GITHUB_TRIGGERING_ACTOR} \
-          --upwind-uri=${{ inputs.upwind_uri }} \
-          --upwind-client-id=${{ inputs.upwind_client_id }} \
-          --upwind-client-secret=${{ inputs.upwind_client_secret }} \
-          --docker-image ${{ inputs.docker_image }} \
-          --commit-sha ${COMMIT_SHA} \
-          --branch "${BRANCH}" \
-          --repository "${REPOSITORY}" \
-          --docker-user="${{ inputs.docker_user }}" \
-          --docker-password="${{ inputs.docker_password }}" \
-          --debug=${{ inputs.debug }}  \
-          --additional-registries="${{ inputs.additional_registries}}" \
-          --docker-pull=${{ inputs.pull_image }} \
-          --output-json=$OUTPUT_JSON \
-          --oci-client=${{ inputs.oci_client }} \
-          --block-on="${{ inputs.block_on}}" \
-          --should-perform-multi-platform-scan=${{ inputs.perform_multiarchitecture_image_scan}} \
+          --initiator="${GITHUB_TRIGGERING_ACTOR}" \
+          --upwind-uri="$INPUT_UPWIND_URI" \
+          --upwind-client-id="$INPUT_UPWIND_CLIENT_ID" \
+          --upwind-client-secret="$INPUT_UPWIND_CLIENT_SECRET" \
+          --docker-image "$DOCKER_IMAGE" \
+          --commit-sha "$COMMIT_SHA" \
+          --branch "$BRANCH" \
+          --repository "$REPOSITORY" \
+          --docker-user="$INPUT_DOCKER_USER" \
+          --docker-password="$INPUT_DOCKER_PASSWORD" \
+          --debug="$INPUT_DEBUG" \
+          --additional-registries="$ADDITIONAL_REGISTRIES" \
+          --docker-pull="$INPUT_PULL_IMAGE" \
+          --output-json="$OUTPUT_JSON" \
+          --oci-client="$INPUT_OCI_CLIENT" \
+          --block-on="$INPUT_BLOCK_ON" \
+          --should-perform-multi-platform-scan="$INPUT_PERFORM_MULTIARCH_SCAN" \
           "${EXTRA_ARGS[@]}"
-        bash "${GITHUB_ACTION_PATH:-${{ github.action_path }}}/scripts/check_scan_output.sh" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR"
+        bash "$ACTION_PATH/scripts/check_scan_output.sh" "$OUTPUT_JSON" "$FAIL_ON_SCAN_ERROR"
 
         # Scan duration for the comment footer.
         SCAN_ELAPSED=$(( $(date +%s) - SCAN_START ))
@@ -273,7 +306,7 @@ runs:
         echo "SCAN_DURATION_HUMAN=${SCAN_DURATION_HUMAN}" >> "$GITHUB_ENV"
 
         # Export the resolved SHA for the comment step: inputs.commit_sha
-        # defaults to a literal "${GITHUB_SHA}" only this inline shell expands.
+        # defaults to a literal "${GITHUB_SHA}" that only this step expands.
         echo "RESOLVED_COMMIT_SHA=${COMMIT_SHA}" >> "$GITHUB_ENV"
     - name: Comment on PR (conditional)
       shell: bash
@@ -589,12 +622,13 @@ runs:
     - name: Enforce Upwind block policy
       if: ${{ inputs.enforce_block_policy == 'true' }}
       shell: bash
+      env:
+        OUTPUT_JSON: ${{ inputs.output_json }}
       run: |
         # The block policy (how many vulnerabilities of which severities warrant a
         # block) is owned entirely by the Upwind backend. This step only obeys the
         # server-decided verdict `shouldBlockPr` in the scan output — it never
         # recomputes a threshold here.
-        OUTPUT_JSON="${{ inputs.output_json }}"
         if [ ! -f "$OUTPUT_JSON" ]; then
           echo "::warning::enforce_block_policy enabled but $OUTPUT_JSON not found; skipping block policy"
           exit 0
