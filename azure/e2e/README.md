@@ -1,6 +1,6 @@
 # Azure Pipelines image scan task - live e2e runbook
 
-Repeatable end-to-end validation of the `UpwindImageScan@0` task against Upwind's own test
+Repeatable end-to-end validation of the `UpwindImageScan@1` task against Upwind's own test
 org. Everything here is private test infrastructure; the extension is the private dev build
 (`vss-extension.dev.json`). Never publish the prod manifest from this runbook.
 
@@ -8,7 +8,7 @@ Last full run: 2026-10-18, extension `upwindsecurity.upwind-image-scan-dev` v0.0
 Last regression run: 2026-10-22, v0.0.4 (review fixes), all scenarios below passed.
 
 The dev extension publishes the task as `UpwindImageScanDev@0` (own GUID, see the release
-workflow's rebrand step), so the e2e YAML must reference that name, not `UpwindImageScan@0`.
+workflow's rebrand step), so the e2e YAML must reference that name, not `UpwindImageScan@1`.
 
 ## Environment
 

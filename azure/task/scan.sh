@@ -71,9 +71,9 @@ if [ -n "${UPWIND_SHIFTLEFT_PATH:-}" ]; then
 elif [ "$DRY_RUN" != "1" ]; then
   # ---- OAuth + binary download (same release bucket as the GHA action) ----
   TOKEN=$(curl -sSL -X POST "https://oauth.${UPWIND_URI}/oauth/token" \
-    --data "audience=https://agent.${UPWIND_URI}" \
-    --data "client_id=${CLIENT_ID}" \
-    --data "client_secret=${CLIENT_SECRET}" \
+    --data-urlencode "audience=https://agent.${UPWIND_URI}" \
+    --data-urlencode "client_id=${CLIENT_ID}" \
+    --data-urlencode "client_secret=${CLIENT_SECRET}" \
     --data "grant_type=client_credentials" | jq -r '.access_token // empty')
   [ -n "$TOKEN" ] || { echo "Error: could not obtain Upwind OAuth token"; exit 1; }
   OS=$(uname | tr '[:upper:]' '[:lower:]')

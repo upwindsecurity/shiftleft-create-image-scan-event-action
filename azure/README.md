@@ -7,7 +7,7 @@ resolved, and existing CVEs plus a per-PR scan history.
 
 The task downloads the `shiftleft` binary, scans the image you just built,
 reports the results to your Upwind organization (they appear in the Console
-under Vulnerabilities > CI scans), and - on pull-request builds - posts or
+under Code > Code & build scans), and - on pull-request builds - posts or
 updates one comment thread per PR.
 
 ## Quick start
