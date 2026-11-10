@@ -71,7 +71,7 @@ release channel.
 | `dockerImage` | yes | | The image to scan, e.g. `myapp:$(Build.SourceVersion)` |
 | `upwindClientId` | yes | | Upwind sensor credential id |
 | `upwindClientSecret` | yes | | Upwind sensor credential secret; pass a secret pipeline variable such as `$(UPWIND_CLIENT_SECRET)` |
-| `upwindUri` | no | `upwind.io` | Upwind domain: `upwind.io` or `upwind.dev` |
+| `upwindUri` | no | `upwind.io` | Upwind domain: `upwind.io`, or your data-residency region (`eu.upwind.io`, `me.upwind.io`, `ap.upwind.io`, `au.upwind.io`) |
 | `dockerUser` | no | | Registry user for pulling from a private registry |
 | `dockerPassword` | no | | Registry password/token for pulling from a private registry; pass a secret pipeline variable |
 | `dockerPull` | no | `true` | `false` when the image was built earlier in the same pipeline (default: pull from the registry) |

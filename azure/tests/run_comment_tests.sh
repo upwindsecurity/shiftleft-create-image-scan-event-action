@@ -53,6 +53,19 @@ check "single: history blob decodes with counts" "$?"
 run_dry tests/fixtures/single.json "My Proj"
 echo "$BODY" | grep -qF '/My%20Proj/_git/repo/commit/'; check "single: project name encoded in commit URL" "$?"
 
+# test_console_host_region_strip: shared regions use the global console,
+# dedicated deployments keep their own host (mirrors the CLI's consoleScanURL)
+for uri_host in eu.upwind.io:console.upwind.io me.upwind.io:console.upwind.io ap.upwind.io:console.upwind.io au.upwind.io:console.upwind.io pdc02.upwind.io:console.pdc02.upwind.io upwind.dev:console.upwind.dev upwind.io:console.upwind.io; do
+  uri="${uri_host%%:*}"; want="${uri_host#*:}"
+  BODY=$(UPWIND_ADO_DRY_RUN=1 UPWIND_COMMENT_TOKEN=dummy OUTPUT_JSON=tests/fixtures/single.json \
+    UPWIND_URI="$uri" SCAN_DURATION_HUMAN=38s \
+    SYSTEM_TEAMFOUNDATIONCOLLECTIONURI=https://dev.azure.com/org/ \
+    SYSTEM_TEAMPROJECT=proj BUILD_REPOSITORY_NAME=repo \
+    SYSTEM_PULLREQUEST_PULLREQUESTID=7 BUILD_SOURCEVERSION=abcdef1234567890 \
+    SYSTEM_PULLREQUEST_TARGETBRANCH=refs/heads/main bash "$SCRIPT" 2>/dev/null)
+  echo "$BODY" | grep -qF "https://${want}/?redirectToCodeScanId="; check "console host: $uri -> $want" "$?"
+done
+
 # test_multi_arch_array
 run_dry tests/fixtures/multiarch.json
 check "multiarch: exits 0" "$RC"

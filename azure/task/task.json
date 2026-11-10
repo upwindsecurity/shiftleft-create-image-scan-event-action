@@ -42,7 +42,7 @@
       "label": "Upwind domain",
       "defaultValue": "upwind.io",
       "required": false,
-      "helpMarkDown": "Upwind domain, upwind.io (default) or upwind.dev."
+      "helpMarkDown": "Upwind domain: upwind.io (default), or your data-residency region, e.g. eu.upwind.io, me.upwind.io, ap.upwind.io or au.upwind.io."
     },
     {
       "name": "dockerUser",

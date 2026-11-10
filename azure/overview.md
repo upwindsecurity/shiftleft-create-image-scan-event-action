@@ -35,7 +35,8 @@ steps:
 To post the pull request comment, grant the project build service identity
 **Contribute to pull requests** on the repository once (Project settings >
 Repositories > Security). Accounts with data residency in the EU, ME, or AP
-region set `upwindUri` to `eu.upwind.io`, `me.upwind.io`, or `ap.upwind.io`.
+region set `upwindUri` to `eu.upwind.io`, `me.upwind.io`, `ap.upwind.io`, or
+`au.upwind.io`.
 
 ## Requirements
 
