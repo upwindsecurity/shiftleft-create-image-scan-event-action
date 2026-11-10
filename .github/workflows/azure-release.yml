@@ -82,6 +82,20 @@ jobs:
           echo "publisher=$(jq -r '.publisher' "$MANIFEST")" >> "$GITHUB_OUTPUT"
           echo "ext_id=$(jq -r '.id' "$MANIFEST")" >> "$GITHUB_OUTPUT"
 
+      # Customer releases publish to every installed org, so the tagged commit
+      # must be reviewed code: on main. Dev tags (azure-dev-v*) are exempt -
+      # e2e releases the private dev extension from feature branches.
+      # (v1.0.0 and v1.0.1 predate this guard and were tagged from the PR branch.)
+      - name: Require the tag to point at main
+        if: env.IS_DEV == 'false'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Tag ${{ github.ref_name }} points at $(git rev-parse --short HEAD), which is not on main. Merge first, then tag from main."
+            exit 1
+          fi
+
       # Both versions must bump or Azure DevOps ignores the update: the
       # extension manifest version and the task.json version object.
       - name: Sync versions
