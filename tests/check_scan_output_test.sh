@@ -44,5 +44,10 @@ fi
 # mktemp-free: the guard must not depend on a writable TMPDIR.
 TMPDIR=/nonexistent check "no TMPDIR, fail on" fixtures/empty.json true 1 "::error::"
 
+# Azure Pipelines: logging commands instead of GitHub annotations.
+UPWIND_LOG_FORMAT=azure check "azure, empty, fail on"  fixtures/empty.json true 1 "##vso\[task.logissue type=error\]"
+UPWIND_LOG_FORMAT=azure check "azure, empty, fail off" fixtures/empty.json false 0 "##vso\[task.logissue type=warning\]"
+UPWIND_LOG_FORMAT=azure check "azure, missing file"    fixtures/does_not_exist.json false 1 "##vso\[task.logissue type=error\]"
+
 if [ "$fail" -eq 0 ]; then echo "PASS"; else echo "FAILED"; fi
 exit "$fail"
