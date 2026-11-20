@@ -100,4 +100,28 @@ grep -A1 -xF -- '--commit-sha' "$WORK/shiftleft_args" | grep -qxF abc123 && ok "
 grep -qxF 'RESOLVED_COMMIT_SHA=abc123' "$WORK/github_env" && ok "resolved commit sha exported" \
   || bad "resolved commit sha not exported: $(cat "$WORK/github_env")"
 
+# result_wait_seconds: unset leaves the CLI default, a number is passed, anything else fails the step.
+SCAN_STEP="$(step_file 'Execute scan against the docker image')"
+run_step "scan without result wait" "$SCAN_STEP" OUTPUT_JSON=out.json FAIL_ON_SCAN_ERROR=false \
+  || bad "scan step failed: $(cat "$WORK/out")"
+grep -q -- '--result-wait-seconds' "$WORK/shiftleft_args" \
+  && bad "result wait passed when unset: $(cat "$WORK/shiftleft_args")" \
+  || ok "result wait omitted when unset"
+run_step "scan with result wait" "$SCAN_STEP" OUTPUT_JSON=out.json FAIL_ON_SCAN_ERROR=false \
+  INPUT_RESULT_WAIT_SECONDS=300 \
+  || bad "scan step failed: $(cat "$WORK/out")"
+grep -qxF -- '--result-wait-seconds=300' "$WORK/shiftleft_args" && ok "result wait passed to the CLI" \
+  || bad "result wait not passed: $(cat "$WORK/shiftleft_args")"
+for wait in 0 -5 1.5 300s "300 --debug" "x\$(touch $MARK)"; do
+  rm -f "$WORK/shiftleft_args"
+  if run_step "scan with result wait [$wait]" "$SCAN_STEP" OUTPUT_JSON=out.json FAIL_ON_SCAN_ERROR=false \
+    INPUT_RESULT_WAIT_SECONDS="$wait"; then
+    bad "result wait [$wait] accepted"
+  elif [ -e "$WORK/shiftleft_args" ]; then
+    bad "result wait [$wait] rejected after the CLI ran"
+  else
+    ok "result wait [$wait] rejected"
+  fi
+done
+
 exit "$fail"
