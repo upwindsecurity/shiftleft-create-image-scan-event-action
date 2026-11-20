@@ -47,7 +47,8 @@ Inputs are passed to the scan as plain values and are never run as shell code. I
 | `main_branch`                          | No       | –               | Base/target branch to diff against (typically `github.event.pull_request.base.ref`). When set, introduced/resolved CVEs are computed against the latest scanned image of this branch instead of the previous scan. Requires that branch to have been scanned. |
 | `pr_id`                                | No       | –               | Pull request identifier to associate with the scan.                                                                                 |
 | `pr_link`                              | No       | –               | Pull request URL to associate with the scan.                                                                                        |
-| `fail_on_scan_error`                   | No       | `false`         | Fail the step when the scan could not be completed at all (image could not be unpacked, build event rejected, SBOM upload failed, results unfetchable). By default the error is reported and the workflow continues. |
+| `fail_on_scan_error`                   | No       | `false`         | Fail the step when the scan could not be completed at all (image could not be unpacked, build event rejected, SBOM upload failed, results unfetchable) or its results were not ready within `result_wait_seconds`. By default the error is reported and the workflow continues. |
+| `result_wait_seconds`                  | No       | `120`           | How long to wait, in seconds, for scan results after the scan completes. The default is the scanner's own wait.                     |
 
 Sensitive values such as `upwind_client_id`, `upwind_client_secret`, and `docker_password` should be stored securely using GitHub Secrets.
 
@@ -156,6 +157,16 @@ image could not be unpacked by the scanner:
     docker_image: 'your-docker-image:tag'
     pull_image: false
     fail_on_scan_error: true
+```
+
+With `fail_on_scan_error: true`, the step also fails when the scan finishes but
+its results are not ready within the wait window (120 seconds by default). The
+scan still completes in Upwind and appears in the console. If your results
+occasionally arrive late, raise the wait with `result_wait_seconds`:
+
+```yaml
+    fail_on_scan_error: true
+    result_wait_seconds: 300
 ```
 
 This is independent of `enforce_block_policy`, which fails the step on the
